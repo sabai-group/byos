@@ -1,0 +1,485 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>BYOS Supplier Roster</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #111827;
+        --panel: #1f2937;
+        --muted: #9ca3af;
+        --text: #f9fafb;
+        --accent: #22c55e;
+        --danger: #ef4444;
+      }
+
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        background: linear-gradient(160deg, #020617, #111827 45%, #1f2937);
+        color: var(--text);
+      }
+
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+        padding: 32px 20px 48px;
+      }
+
+      .panel {
+        background: rgba(31, 41, 55, 0.9);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 16px;
+        padding: 20px;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      }
+
+      h1, h2 {
+        margin-top: 0;
+      }
+
+      p {
+        color: var(--muted);
+      }
+
+      label {
+        display: block;
+        margin-bottom: 8px;
+        font-weight: 600;
+      }
+
+      input, textarea, button {
+        width: 100%;
+        border-radius: 10px;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        padding: 12px 14px;
+        font: inherit;
+        box-sizing: border-box;
+      }
+
+      input, textarea {
+        background: rgba(15, 23, 42, 0.85);
+        color: var(--text);
+      }
+
+      textarea {
+        min-height: 420px;
+        resize: vertical;
+        font-family: ui-monospace, SFMono-Regular, monospace;
+      }
+
+      button {
+        background: var(--accent);
+        color: #052e16;
+        font-weight: 700;
+        cursor: pointer;
+        margin-top: 12px;
+      }
+
+      button.secondary {
+        background: transparent;
+        color: var(--text);
+      }
+
+      .row {
+        display: flex;
+        gap: 12px;
+      }
+
+      .row > * {
+        flex: 1;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .status {
+        margin-top: 12px;
+        min-height: 24px;
+      }
+
+      .card {
+        margin-bottom: 20px;
+        padding: 16px;
+        border-radius: 12px;
+        background: rgba(15, 23, 42, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+      }
+
+      .qr-wrap {
+        margin-top: 14px;
+      }
+
+      .qr-wrap.hidden {
+        display: none !important;
+      }
+
+      .qr-image {
+        display: block;
+        max-width: 320px;
+        width: 100%;
+        border-radius: 12px;
+        background: white;
+        padding: 12px;
+        box-sizing: border-box;
+      }
+
+      .error {
+        color: var(--danger);
+      }
+
+      .success {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section id="login-panel" class="panel hidden">
+        <h1>BYOS Supplier Roster</h1>
+        <p>Enter the deployment password to view and update the supplier roster JSON.</p>
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" />
+        <button id="login-button">Log In</button>
+        <div id="login-status" class="status"></div>
+      </section>
+
+      <section id="app-panel" class="panel hidden">
+        <div class="row">
+          <div>
+            <h2>Supplier Roster</h2>
+            <p>Suppliers are stored encrypted in Sabai. Names are decrypted locally for display.</p>
+          </div>
+          <div style="text-align:right">
+            <button id="logout-button" class="secondary">Log Out</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>WhatsApp Linking</h2>
+          <p>When unpaired, a QR appears here automatically (or after you use Force New QR). Use Refresh Status to update the view.</p>
+          <div class="row">
+            <button id="refresh-whatsapp-button" class="secondary">Refresh Status</button>
+            <button id="force-whatsapp-button" class="secondary">Force New QR</button>
+          </div>
+          <div id="whatsapp-status" class="status"></div>
+          <div id="whatsapp-qr-wrap" class="qr-wrap hidden" aria-hidden="true">
+            <img id="whatsapp-qr" class="qr-image" alt="WhatsApp linking QR code" decoding="async" />
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Add Supplier</h2>
+          <p>The name is encrypted before leaving this machine.</p>
+          <div class="row">
+            <div>
+              <label for="new-supplier-name">Supplier Name</label>
+              <input id="new-supplier-name" type="text" placeholder="Acme Corp" />
+            </div>
+            <div>
+              <label for="new-supplier-domain">Domain (optional)</label>
+              <input id="new-supplier-domain" type="text" placeholder="acme.com" />
+            </div>
+          </div>
+          <button id="add-supplier-button">Add Supplier</button>
+          <div id="add-supplier-status" class="status"></div>
+        </div>
+
+        <div class="card">
+          <h2>Current Suppliers</h2>
+          <button id="refresh-roster-button" class="secondary" style="margin-bottom:12px">Refresh</button>
+          <table id="supplier-table" style="width:100%;border-collapse:collapse;">
+            <thead>
+              <tr>
+                <th style="text-align:left;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.12);">Name</th>
+                <th style="text-align:left;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.12);">Domain</th>
+              </tr>
+            </thead>
+            <tbody id="supplier-tbody"></tbody>
+          </table>
+          <div id="app-status" class="status"></div>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      const loginPanel = document.getElementById("login-panel");
+      const appPanel = document.getElementById("app-panel");
+      const loginStatus = document.getElementById("login-status");
+      const appStatus = document.getElementById("app-status");
+      const supplierTbody = document.getElementById("supplier-tbody");
+      const addSupplierStatus = document.getElementById("add-supplier-status");
+      const whatsappStatus = document.getElementById("whatsapp-status");
+
+      function whatsappQrWrap() {
+        return document.getElementById("whatsapp-qr-wrap");
+      }
+
+      function getWhatsappQrImg() {
+        return document.getElementById("whatsapp-qr");
+      }
+
+      const WHATSAPP_POLL_MS = 2800;
+      let whatsappPollTimer = null;
+      let whatsappPrev = { ready: false, pairing: false, hadQr: false };
+
+      function isLikelyQrDataUrl(value) {
+        return (
+          typeof value === "string" &&
+          /^data:image\/(png|jpeg|gif|webp);base64,[\s\S]+/.test(value)
+        );
+      }
+
+      function hideWhatsappQr() {
+        const wrap = whatsappQrWrap();
+        wrap.classList.add("hidden");
+        wrap.setAttribute("aria-hidden", "true");
+        const oldImg = getWhatsappQrImg();
+        if (!oldImg) return;
+        const img = document.createElement("img");
+        img.id = "whatsapp-qr";
+        img.className = "qr-image";
+        img.alt = "WhatsApp linking QR code";
+        img.decoding = "async";
+        oldImg.replaceWith(img);
+      }
+
+      function showWhatsappQr(dataUrl) {
+        const wrap = whatsappQrWrap();
+        const img = getWhatsappQrImg();
+        img.src = dataUrl;
+        wrap.classList.remove("hidden");
+        wrap.setAttribute("aria-hidden", "false");
+      }
+
+      function stopWhatsappPoll() {
+        if (whatsappPollTimer) {
+          clearInterval(whatsappPollTimer);
+          whatsappPollTimer = null;
+        }
+      }
+
+      function startWhatsappPoll() {
+        stopWhatsappPoll();
+        whatsappPollTimer = setInterval(async () => {
+          if (appPanel.classList.contains("hidden")) return;
+          try {
+            const state = await api("/api/whatsapp/status");
+            renderWhatsappState(state);
+          } catch {
+            /* ignore transient errors */
+          }
+        }, WHATSAPP_POLL_MS);
+      }
+
+      async function api(path, options = {}) {
+        const response = await fetch(path, {
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+          ...options,
+        });
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : {};
+        if (!response.ok) {
+          throw new Error(data.error || `Request failed with ${response.status}`);
+        }
+        return data;
+      }
+
+      function showLogin() {
+        stopWhatsappPoll();
+        whatsappPrev = { ready: false, pairing: false, hadQr: false };
+        loginPanel.classList.remove("hidden");
+        appPanel.classList.add("hidden");
+      }
+
+      function showApp() {
+        loginPanel.classList.add("hidden");
+        appPanel.classList.remove("hidden");
+        startWhatsappPoll();
+      }
+
+      async function loadRoster() {
+        const roster = await api("/api/roster");
+        supplierTbody.innerHTML = "";
+        for (const s of roster.suppliers || []) {
+          const tr = document.createElement("tr");
+          const tdName = document.createElement("td");
+          tdName.style.cssText = "padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.06);";
+          tdName.textContent = s.canonicalName;
+          const tdDomain = document.createElement("td");
+          tdDomain.style.cssText = "padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.06);color:var(--muted);";
+          tdDomain.textContent = (s.aliases && s.aliases[0]) || "—";
+          tr.appendChild(tdName);
+          tr.appendChild(tdDomain);
+          supplierTbody.appendChild(tr);
+        }
+        appStatus.textContent = `Loaded ${(roster.suppliers || []).length} suppliers.`;
+        appStatus.className = "status";
+      }
+
+      function renderWhatsappState(state) {
+        const hadQr = Boolean(state.qrAvailable && isLikelyQrDataUrl(state.qrDataUrl));
+
+        if (state.resetting) {
+          hideWhatsappQr();
+          whatsappStatus.textContent =
+            "Resetting WhatsApp: signing out, wiping the saved session on disk, and starting a fresh browser profile…";
+          whatsappStatus.className = "status";
+          whatsappPrev = { ready: false, pairing: false, hadQr: false };
+          return;
+        }
+
+        if (state.ready) {
+          const justLinked = whatsappPrev.pairing || (!whatsappPrev.ready && whatsappPrev.hadQr);
+          whatsappStatus.textContent = justLinked
+            ? "WhatsApp linked successfully. This session is ready to receive messages."
+            : "WhatsApp is linked and ready. Use “Force New QR” only if you want to relink this deployment.";
+          whatsappStatus.className = "status success";
+          hideWhatsappQr();
+          whatsappPrev = { ready: true, pairing: false, hadQr: false };
+          return;
+        }
+
+        if (state.pairing) {
+          whatsappStatus.textContent =
+            "Phone accepted the link. Finishing setup with WhatsApp… (this page will update when ready.)";
+          whatsappStatus.className = "status";
+          hideWhatsappQr();
+          whatsappPrev = { ready: false, pairing: true, hadQr: false };
+          return;
+        }
+
+        if (state.qrAvailable && isLikelyQrDataUrl(state.qrDataUrl)) {
+          whatsappStatus.textContent = "Scan this QR code with WhatsApp to complete linking.";
+          whatsappStatus.className = "status";
+          showWhatsappQr(state.qrDataUrl);
+          whatsappPrev = { ready: false, pairing: false, hadQr: true };
+          return;
+        }
+
+        hideWhatsappQr();
+        whatsappPrev = { ready: false, pairing: false, hadQr };
+        if (state.waitingForQr) {
+          whatsappStatus.textContent =
+            "A QR code is being sent by email (link request). This page will refresh automatically, or click Refresh Status.";
+          whatsappStatus.className = "status";
+        } else if (state.hasError) {
+          whatsappStatus.textContent = "WhatsApp needs attention. Check the container logs.";
+          whatsappStatus.className = "status error";
+        } else {
+          whatsappStatus.textContent =
+            "No QR is shown right now. If you are not linked, try Refresh Status or restart the container; use Force New QR to relink.";
+          whatsappStatus.className = "status";
+        }
+      }
+
+      async function loadWhatsappStatus() {
+        const state = await api("/api/whatsapp/status");
+        renderWhatsappState(state);
+      }
+
+      async function bootstrap() {
+        try {
+          const session = await api("/api/session", { headers: {} });
+          if (session.authenticated) {
+            showApp();
+            await loadRoster();
+            await loadWhatsappStatus();
+            return;
+          }
+        } catch (error) {
+          console.error(error);
+        }
+        showLogin();
+      }
+
+      document.getElementById("login-button").addEventListener("click", async () => {
+        loginStatus.textContent = "Logging in...";
+        loginStatus.className = "status";
+        try {
+          await api("/api/login", {
+            method: "POST",
+            body: JSON.stringify({ password: document.getElementById("password").value }),
+          });
+          showApp();
+          await loadRoster();
+          await loadWhatsappStatus();
+          loginStatus.textContent = "";
+        } catch (error) {
+          loginStatus.textContent = error.message;
+          loginStatus.className = "status error";
+        }
+      });
+
+      document.getElementById("logout-button").addEventListener("click", async () => {
+        await api("/api/logout", { method: "POST" });
+        showLogin();
+      });
+
+      document.getElementById("refresh-whatsapp-button").addEventListener("click", async () => {
+        try {
+          await loadWhatsappStatus();
+        } catch (error) {
+          whatsappStatus.textContent = error.message;
+          whatsappStatus.className = "status error";
+        }
+      });
+
+      document.getElementById("force-whatsapp-button").addEventListener("click", async () => {
+        whatsappStatus.textContent = "Starting full session reset…";
+        whatsappStatus.className = "status";
+        whatsappPrev = { ready: false, pairing: false, hadQr: false };
+        hideWhatsappQr();
+        try {
+          const state = await api("/api/whatsapp/force-link", { method: "POST" });
+          renderWhatsappState(state);
+        } catch (error) {
+          whatsappStatus.textContent = error.message;
+          whatsappStatus.className = "status error";
+        }
+      });
+
+      document.getElementById("add-supplier-button").addEventListener("click", async () => {
+        const nameInput = document.getElementById("new-supplier-name");
+        const domainInput = document.getElementById("new-supplier-domain");
+        const name = nameInput.value.trim();
+        if (!name) {
+          addSupplierStatus.textContent = "Supplier name is required.";
+          addSupplierStatus.className = "status error";
+          return;
+        }
+        addSupplierStatus.textContent = "Adding...";
+        addSupplierStatus.className = "status";
+        try {
+          await api("/api/suppliers", {
+            method: "POST",
+            body: JSON.stringify({ name, domain: domainInput.value.trim() || undefined }),
+          });
+          addSupplierStatus.textContent = `Added "${name}".`;
+          addSupplierStatus.className = "status success";
+          nameInput.value = "";
+          domainInput.value = "";
+          await loadRoster();
+        } catch (error) {
+          addSupplierStatus.textContent = error.message;
+          addSupplierStatus.className = "status error";
+        }
+      });
+
+      document.getElementById("refresh-roster-button").addEventListener("click", async () => {
+        try {
+          await loadRoster();
+        } catch (error) {
+          appStatus.textContent = error.message;
+          appStatus.className = "status error";
+        }
+      });
+
+      bootstrap();
+    </script>
+  </body>
+  </html>

@@ -1,0 +1,12 @@
+services:
+  byos:
+    build:
+      context: .
+    env_file:
+      - .env
+    ports:
+      - "${BYOS_PORT:-8787}:8787"
+      - "${BYOS_SMTP_PORT:-2525}:2525"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

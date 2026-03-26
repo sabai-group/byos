@@ -1,0 +1,7 @@
+node_modules
+dist
+.env
+tsconfig.tsbuildinfo
+__pycache__
+data/.wwebjs_auth
+data/runtime
