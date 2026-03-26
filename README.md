@@ -6,7 +6,7 @@ It runs three things in one container:
 
 - a small SMTP server for inbound offer emails,
 - an unofficial WhatsApp client based on `whatsapp-web.js`,
-- a password-protected web UI for viewing the supplier roster.
+- a password-protected web UI for managing suppliers and WhatsApp linking.
 
 ## What It Does
 
@@ -51,23 +51,9 @@ The web UI is available on `http://localhost:8787` by default.
 
 ## Supplier Roster
 
-The roster is a JSON file with this shape:
-
-```json
-{
-  "updatedAt": "2026-03-21T00:00:00.000Z",
-  "suppliers": [
-    {
-      "id": "sample-supplier",
-      "canonicalName": "Sample Supplier Ltd",
-      "aliases": ["Sample Supplier", "SSL"],
-      "notes": "Optional notes"
-    }
-  ]
-}
-```
-
-Use the web UI to view and edit it instead of modifying the file by hand.
+The supplier roster is fetched live from Sabai via the `/byos/suppliers` API endpoint
+(authenticated by `SABAI_API_KEY`). Suppliers can be added through the web UI, which
+creates them on Sabai with encrypted names.
 
 ## WhatsApp Linking
 
@@ -99,5 +85,4 @@ These artifact paths are shown in the web UI under the WhatsApp Linking panel.
 ## Current Limitations
 
 - Attachment contents are not relayed or redacted yet.
-- The supplier roster is file-backed JSON, not a database.
 - Self-update is intentionally not implemented yet.

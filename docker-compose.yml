@@ -8,5 +8,10 @@ services:
       - "${BYOS_PORT:-8787}:8787"
       - "${BYOS_SMTP_PORT:-2525}:2525"
     volumes:
-      - ./data:/app/data
+      - byos_whatsapp_auth:/app/data/.wwebjs_auth
+      - byos_runtime:/app/data/runtime
     restart: unless-stopped
+
+volumes:
+  byos_whatsapp_auth:
+  byos_runtime:
