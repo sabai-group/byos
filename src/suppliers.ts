@@ -17,7 +17,6 @@ interface SabaiSupplierRow {
   id: number;
   name: string;
   is_encrypted: boolean;
-  domain: string | null;
 }
 
 /** Fetch the supplier roster from Sabai's DB via the /byos/suppliers endpoint. */
@@ -32,12 +31,10 @@ export async function fetchRosterFromSabai(): Promise<SupplierRoster> {
   const data = (await response.json()) as { suppliers: SabaiSupplierRow[] };
   const suppliers: SupplierRecord[] = data.suppliers.map((row) => {
     const name = row.is_encrypted ? decryptSupplierName(row.name) : row.name;
-    const aliases: string[] = [];
-    if (row.domain) aliases.push(row.domain);
     return {
       id: String(row.id),
       canonicalName: name,
-      aliases,
+      aliases: [],
     };
   });
   return { updatedAt: new Date().toISOString(), suppliers };

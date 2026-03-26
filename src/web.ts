@@ -71,7 +71,7 @@ export function createWebApp(options: {
 
   app.post("/api/suppliers", requireSession, async (request, response, next) => {
     try {
-      const { name, domain } = request.body ?? {};
+      const { name } = request.body ?? {};
       if (!name || typeof name !== "string") {
         response.status(400).json({ error: "name is required" });
         return;
@@ -83,7 +83,7 @@ export function createWebApp(options: {
           "Content-Type": "application/json",
           "X-BYOS-API-Key": config.sabaiApiKey,
         },
-        body: JSON.stringify({ name: encrypted, is_encrypted: true, domain: domain || null }),
+        body: JSON.stringify({ name: encrypted, is_encrypted: true }),
       });
       if (!sabaiResponse.ok) {
         const text = await sabaiResponse.text();
