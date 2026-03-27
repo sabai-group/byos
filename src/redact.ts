@@ -342,30 +342,45 @@ const EXCEL_CONTENT_TYPES = new Set([
   "application/vnd.ms-excel.sheet.macroEnabled.12",
 ]);
 
-const STRIP_SCRIPT = path.resolve(__dirname, "../scripts/strip_excel_images.py");
+const REDACT_EXCEL_SCRIPT = path.resolve(__dirname, "../scripts/redact_excel.py");
 
 function isExcelAttachment(attachment: RelayedAttachment): boolean {
   return EXCEL_CONTENT_TYPES.has(attachment.contentType);
 }
 
-function stripImagesFromExcel(xlsxBytes: Buffer): Promise<Buffer> {
+function redactExcelAttachment(xlsxBytes: Buffer, roster: SupplierRoster): Promise<Buffer> {
+  const rosterJson = JSON.stringify(
+    roster.suppliers.map((s) => ({ canonicalName: s.canonicalName, aliases: s.aliases })),
+  );
   return new Promise((resolve, reject) => {
-    const proc = execFile("python3", [STRIP_SCRIPT], { maxBuffer: 100 * 1024 * 1024, encoding: "buffer" as any }, (error, stdout) => {
-      if (error) {
-        reject(new Error(`strip_excel_images.py failed: ${error.message}`));
-        return;
-      }
-      resolve(stdout as unknown as Buffer);
-    });
+    const proc = execFile(
+      "python3",
+      [REDACT_EXCEL_SCRIPT],
+      {
+        maxBuffer: 100 * 1024 * 1024,
+        encoding: "buffer" as any,
+        env: { ...process.env, SUPPLIER_ROSTER: rosterJson },
+      },
+      (error, stdout, stderr) => {
+        if (stderr && (stderr as unknown as Buffer).length > 0) {
+          console.log(`[redact_excel] ${(stderr as unknown as Buffer).toString("utf8").trim()}`);
+        }
+        if (error) {
+          reject(new Error(`redact_excel.py failed: ${error.message}`));
+          return;
+        }
+        resolve(stdout as unknown as Buffer);
+      },
+    );
     proc.stdin!.end(xlsxBytes);
   });
 }
 
 /**
- * Process all attachments: strip embedded images from Excel files.
- * Non-Excel attachments are passed through unchanged.
+ * Process all attachments: strip embedded images and redact supplier-identifying
+ * content from Excel files. Non-Excel attachments pass through unchanged.
  */
-export async function redactAttachments(attachments: RelayedAttachment[]): Promise<RelayedAttachment[]> {
+export async function redactAttachments(attachments: RelayedAttachment[], roster: SupplierRoster): Promise<RelayedAttachment[]> {
   return Promise.all(
     attachments.map(async (attachment) => {
       if (!isExcelAttachment(attachment)) {
@@ -373,15 +388,15 @@ export async function redactAttachments(attachments: RelayedAttachment[]): Promi
       }
       try {
         const raw = Buffer.from(attachment.contentBase64, "base64");
-        const cleaned = await stripImagesFromExcel(raw);
-        console.log(`Stripped images from Excel attachment (${raw.length} → ${cleaned.length} bytes)`);
+        const cleaned = await redactExcelAttachment(raw, roster);
+        console.log(`Redacted Excel attachment (${raw.length} → ${cleaned.length} bytes)`);
         return {
           contentBase64: cleaned.toString("base64"),
           contentType: attachment.contentType,
           sizeBytes: cleaned.length,
         };
       } catch (error) {
-        console.error("Failed to strip images from Excel attachment, relaying original:", error);
+        console.error("Failed to redact Excel attachment, relaying original:", error);
         return attachment;
       }
     }),

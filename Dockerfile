@@ -44,7 +44,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-pip \
   && ln -sf /usr/bin/chromium /usr/bin/byos-browser \
-  && pip3 install --no-cache-dir --break-system-packages openpyxl \
+  && pip3 install --no-cache-dir --break-system-packages openpyxl openai \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

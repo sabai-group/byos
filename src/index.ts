@@ -22,7 +22,7 @@ async function main() {
         text: batch.text,
         messages: batch.messages,
       });
-      const cleanedAttachments = await redactAttachments(batch.attachments);
+      const cleanedAttachments = await redactAttachments(batch.attachments, roster);
       await relayWhatsApp({
         from: redacted.redactedFrom,
         to: batch.to,
@@ -57,7 +57,7 @@ async function main() {
     onEmail: async (email) => {
       const roster = await fetchRosterFromSabai();
       const redacted = await detectAndRedactEmail(roster, email);
-      const cleanedAttachments = await redactAttachments(email.attachments);
+      const cleanedAttachments = await redactAttachments(email.attachments, roster);
       await relayEmail({
         from: redacted.redactedFrom,
         to: email.to,
