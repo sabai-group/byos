@@ -14,6 +14,7 @@ It runs three things in one container:
 - Fetches the encrypted supplier roster from Sabai (scoped to the customer identified by `SABAI_API_KEY`).
 - Detects which supplier sent the message using the fetched roster plus AI.
 - Redacts supplier-identifying mentions from the relayed subject/body text.
+- Redacts file names and images from spreadsheet extensions.
 - Encrypts the canonical supplier name with a BYOS-only key so SABAI ingest never sees plaintext identities (TLS is separate).
 - Sends `SABAI_API_KEY` in `X-BYOS-API-Key` so SABAI can authenticate the BYOS client (HTTPS).
 - Sends the sanitized payload to SABAI at `https://sabai365-16c4b4eee4fe.herokuapp.com` by default.
@@ -81,8 +82,3 @@ On auth failures or disconnects it also attempts to save:
 - the current page HTML
 
 These artifact paths are shown in the web UI under the WhatsApp Linking panel.
-
-## Current Limitations
-
-- Attachment contents are not relayed or redacted yet.
-- Self-update is intentionally not implemented yet.
