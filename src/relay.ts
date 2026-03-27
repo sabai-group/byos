@@ -78,17 +78,17 @@ function supplierMatchForRelay(match: SupplierMatch): Record<string, unknown> {
 
 async function postRelayJson(pathname: string, payload: Record<string, unknown>): Promise<void> {
   const body = JSON.stringify(payload);
-  console.log("disabled relaying to Sabai for debugging");
-  console.log("body", body);
-  // const response = await fetch(`${config.sabaiBaseUrl}${pathname}`, {
-  //   method: "POST",
-  //   headers: relayHeaders(),
-  //   body,
-  // });
-  // if (!response.ok) {
-  //   const text = await response.text();
-  //   throw new Error(`BYOS relay failed (${response.status}): ${text}`);
-  // }
+  // console.log("disabled relaying to Sabai for debugging");
+  // console.log("body", body);
+  const response = await fetch(`${config.sabaiBaseUrl}${pathname}`, {
+    method: "POST",
+    headers: relayHeaders(),
+    body,
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`BYOS relay failed (${response.status}): ${text}`);
+  }
 }
 
 /**
