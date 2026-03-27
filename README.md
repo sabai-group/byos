@@ -36,11 +36,11 @@ The web UI is available on `http://localhost:8787` by default.
 
 - `BYOS_ADMIN_PASSWORD`: Web UI password. Defaults to `365`.
 - `SABAI_API_KEY`: Required. Customer-specific key from the Sabai `customer` table (`X-BYOS-API-Key` header). Also used to fetch the supplier roster.
-- `SECRET_ENCRYPTION_KEY`: Required on BYOS. AES-256-SIV key for supplier name encryption; never configure this on SABAI.
+- `SECRET_ENCRYPTION_KEY`: Required on BYOS. Key used for AES-GCM encryption; never share this with SABAI.
 - `SABAI_BASE_URL`: Defaults to `https://sabai365-16c4b4eee4fe.herokuapp.com`.
 - `OPENAI_API_KEY`: AI provider key.
 - `OPENAI_BASE_URL`: Optional override for OpenRouter or another OpenAI-compatible endpoint.
-- `BYOS_AI_MODEL`: Defaults to `gpt-4.1-mini`.
+- `BYOS_AI_MODEL`: Defaults to `gpt-5-mini`.
 - `BYOS_ADMIN_EMAIL_TO` / `BYOS_ADMIN_EMAIL_FROM`: Destination/source for QR code emails.
 - `BYOS_SMTP_RELAY_*`: Outbound SMTP settings for QR code delivery.
 - `WHATSAPP_DEBUG`: Enables verbose WhatsApp lifecycle logging and artifact capture.
