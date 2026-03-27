@@ -3,9 +3,13 @@
  * ingest does not see those names in content. The relay sends the Sabai-side supplier ID (numeric)
  * rather than any form of the supplier name. Relay auth uses SABAI_API_KEY over HTTPS.
  */
+import { execFile } from "child_process";
+import path from "path";
+
 import OpenAI from "openai";
 
 import { config } from "./config";
+import type { RelayedAttachment } from "./relay";
 import type { SupplierRecord, SupplierRoster } from "./suppliers";
 
 export interface SupplierMatch {
@@ -331,4 +335,55 @@ export async function detectAndRedactWhatsApp(
     redactedText,
     redactedMessages,
   };
+}
+
+const EXCEL_CONTENT_TYPES = new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel.sheet.macroEnabled.12",
+]);
+
+const STRIP_SCRIPT = path.resolve(__dirname, "../scripts/strip_excel_images.py");
+
+function isExcelAttachment(attachment: RelayedAttachment): boolean {
+  return EXCEL_CONTENT_TYPES.has(attachment.contentType);
+}
+
+function stripImagesFromExcel(xlsxBytes: Buffer): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const proc = execFile("python3", [STRIP_SCRIPT], { maxBuffer: 100 * 1024 * 1024, encoding: "buffer" as any }, (error, stdout) => {
+      if (error) {
+        reject(new Error(`strip_excel_images.py failed: ${error.message}`));
+        return;
+      }
+      resolve(stdout as unknown as Buffer);
+    });
+    proc.stdin!.end(xlsxBytes);
+  });
+}
+
+/**
+ * Process all attachments: strip embedded images from Excel files.
+ * Non-Excel attachments are passed through unchanged.
+ */
+export async function redactAttachments(attachments: RelayedAttachment[]): Promise<RelayedAttachment[]> {
+  return Promise.all(
+    attachments.map(async (attachment) => {
+      if (!isExcelAttachment(attachment)) {
+        return attachment;
+      }
+      try {
+        const raw = Buffer.from(attachment.contentBase64, "base64");
+        const cleaned = await stripImagesFromExcel(raw);
+        console.log(`Stripped images from Excel attachment (${raw.length} → ${cleaned.length} bytes)`);
+        return {
+          contentBase64: cleaned.toString("base64"),
+          contentType: attachment.contentType,
+          sizeBytes: cleaned.length,
+        };
+      } catch (error) {
+        console.error("Failed to strip images from Excel attachment, relaying original:", error);
+        return attachment;
+      }
+    }),
+  );
 }

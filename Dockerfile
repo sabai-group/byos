@@ -41,7 +41,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxtst6 \
     xdg-utils \
     chromium \
+    python3 \
+    python3-pip \
   && ln -sf /usr/bin/chromium /usr/bin/byos-browser \
+  && pip3 install --no-cache-dir --break-system-packages openpyxl \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -50,6 +53,7 @@ COPY package.json tsconfig.json ./
 RUN npm install
 
 COPY src ./src
+COPY scripts ./scripts
 COPY .env.example ./.env.example
 
 RUN npm run build

@@ -2,7 +2,7 @@ import type { Server as HttpServer } from "http";
 
 import { validateConfig, config } from "./config";
 import { sendQrCodeEmail } from "./mailer";
-import { detectAndRedactEmail, detectAndRedactWhatsApp } from "./redact";
+import { detectAndRedactEmail, detectAndRedactWhatsApp, redactAttachments } from "./redact";
 import { relayEmail, relayWhatsApp } from "./relay";
 import { startSmtpServer } from "./smtp";
 import { fetchRosterFromSabai } from "./suppliers";
@@ -22,12 +22,13 @@ async function main() {
         text: batch.text,
         messages: batch.messages,
       });
+      const cleanedAttachments = await redactAttachments(batch.attachments);
       await relayWhatsApp({
         from: redacted.redactedFrom,
         to: batch.to,
         text: redacted.redactedText,
         messages: redacted.redactedMessages,
-        attachments: batch.attachments,
+        attachments: cleanedAttachments,
         metadata: {
           ...batch.metadata,
           waid: "redacted",
@@ -56,13 +57,14 @@ async function main() {
     onEmail: async (email) => {
       const roster = await fetchRosterFromSabai();
       const redacted = await detectAndRedactEmail(roster, email);
+      const cleanedAttachments = await redactAttachments(email.attachments);
       await relayEmail({
         from: redacted.redactedFrom,
         to: email.to,
         subject: redacted.redactedSubject,
         text: redacted.redactedText,
         html: redacted.redactedHtml,
-        attachments: email.attachments,
+        attachments: cleanedAttachments,
         metadata: {
           byos_received_at: new Date().toISOString(),
         },
