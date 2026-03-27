@@ -1,17 +1,16 @@
 /**
  * Relays redacted traffic to Sabai: SABAI_API_KEY in X-BYOS-API-Key authenticates the client (HTTPS).
- * AES-256-SIV hides the canonical supplier name from Sabai (see config.supplierEncryptionKey).
- * Deterministic: same plaintext + key → same ciphertext, so Sabai can join on encrypted names.
+ * AES-256-GCM encrypts canonical supplier names stored in Sabai's DB (see config.supplierEncryptionKey).
+ * The relay payload sends the Sabai-side supplier ID directly — no encrypted name on the wire.
  */
 import crypto from "crypto";
-import { aessiv } from "@noble/ciphers/aes.js";
 
 import { config } from "./config";
 import type { SupplierMatch } from "./redact";
 
-export interface AttachmentManifest {
-  filename: string;
-  contentType?: string;
+export interface RelayedAttachment {
+  contentBase64: string;
+  contentType: string;
   sizeBytes?: number;
 }
 
@@ -21,7 +20,7 @@ export interface RelayedEmailPayload {
   subject?: string;
   text?: string;
   html?: string;
-  attachmentManifests: AttachmentManifest[];
+  attachments: RelayedAttachment[];
   metadata?: Record<string, unknown>;
   supplierMatch: SupplierMatch;
 }
@@ -31,30 +30,36 @@ export interface RelayedWhatsAppPayload {
   to?: string;
   text?: string;
   messages: Array<Record<string, unknown>>;
-  attachmentManifests: AttachmentManifest[];
+  attachments: RelayedAttachment[];
   metadata?: Record<string, unknown>;
   supplierMatch: SupplierMatch;
 }
 
-/** Derive a 64-byte key for AES-256-SIV (two 32-byte sub-keys per RFC 5297). */
-function deriveKey(): Uint8Array {
-  return new Uint8Array(crypto.createHash("sha512").update(config.supplierEncryptionKey).digest());
+/** Derive a 32-byte key for AES-256-GCM. */
+function deriveKey(): Buffer {
+  return crypto.createHash("sha256").update(config.supplierEncryptionKey).digest();
 }
 
-/** AES-256-SIV deterministic encryption — single base64 blob (SIV tag ‖ ciphertext). No AAD. */
+/** AES-256-GCM encryption — base64(IV ‖ ciphertext ‖ authTag). */
 export function encryptSupplierName(supplierName: string): string {
   const key = deriveKey();
-  const plaintext = new TextEncoder().encode(supplierName);
-  const ciphertext = aessiv(key).encrypt(plaintext);
-  return Buffer.from(ciphertext).toString("base64");
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const ciphertext = Buffer.concat([cipher.update(supplierName, "utf8"), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return Buffer.concat([iv, ciphertext, tag]).toString("base64");
 }
 
 /** Inverse of encryptSupplierName. */
 export function decryptSupplierName(encrypted: string): string {
   const key = deriveKey();
-  const ciphertext = new Uint8Array(Buffer.from(encrypted, "base64"));
-  const plaintext = aessiv(key).decrypt(ciphertext);
-  return new TextDecoder().decode(plaintext);
+  const data = Buffer.from(encrypted, "base64");
+  const iv = data.subarray(0, 12);
+  const tag = data.subarray(-16);
+  const ciphertext = data.subarray(12, -16);
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, iv);
+  decipher.setAuthTag(tag);
+  return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
 }
 
 function relayHeaders(): Record<string, string> {
@@ -73,15 +78,30 @@ function supplierMatchForRelay(match: SupplierMatch): Record<string, unknown> {
 
 async function postRelayJson(pathname: string, payload: Record<string, unknown>): Promise<void> {
   const body = JSON.stringify(payload);
-  const response = await fetch(`${config.sabaiBaseUrl}${pathname}`, {
-    method: "POST",
-    headers: relayHeaders(),
-    body,
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`BYOS relay failed (${response.status}): ${text}`);
-  }
+  console.log("disabled relaying to Sabai for debugging");
+  console.log("body", body);
+  // const response = await fetch(`${config.sabaiBaseUrl}${pathname}`, {
+  //   method: "POST",
+  //   headers: relayHeaders(),
+  //   body,
+  // });
+  // if (!response.ok) {
+  //   const text = await response.text();
+  //   throw new Error(`BYOS relay failed (${response.status}): ${text}`);
+  // }
+}
+
+/**
+ * Maps a RelayedAttachment to the wire format for Sabai.
+ * Filenames are never sent — they often contain supplier names
+ * (e.g. "AcmeDistillers_pricelist.xlsx") which would leak identity.
+ */
+function attachmentForRelay(a: RelayedAttachment): Record<string, unknown> {
+  return {
+    content: a.contentBase64,
+    content_type: a.contentType,
+    size_bytes: a.sizeBytes,
+  };
 }
 
 export async function relayEmail(payload: RelayedEmailPayload): Promise<void> {
@@ -93,15 +113,10 @@ export async function relayEmail(payload: RelayedEmailPayload): Promise<void> {
     subject: payload.subject,
     text: payload.text,
     html: payload.html,
-    attachments: [],
-    attachment_manifests: payload.attachmentManifests.map((attachment) => ({
-      filename: attachment.filename,
-      content_type: attachment.contentType,
-      size_bytes: attachment.sizeBytes,
-    })),
+    attachments: payload.attachments.map(attachmentForRelay),
     metadata: payload.metadata ?? {},
     supplier_match: supplierMatchForRelay(payload.supplierMatch),
-    encrypted_supplier_name: encryptSupplierName(payload.supplierMatch.canonicalName),
+    supplier_id: parseInt(payload.supplierMatch.supplierId, 10),
   });
 }
 
@@ -113,14 +128,9 @@ export async function relayWhatsApp(payload: RelayedWhatsAppPayload): Promise<vo
     to: payload.to,
     text: payload.text,
     messages: payload.messages,
-    attachments: [],
-    attachment_manifests: payload.attachmentManifests.map((attachment) => ({
-      filename: attachment.filename,
-      content_type: attachment.contentType,
-      size_bytes: attachment.sizeBytes,
-    })),
+    attachments: payload.attachments.map(attachmentForRelay),
     metadata: payload.metadata ?? {},
     supplier_match: supplierMatchForRelay(payload.supplierMatch),
-    encrypted_supplier_name: encryptSupplierName(payload.supplierMatch.canonicalName),
+    supplier_id: parseInt(payload.supplierMatch.supplierId, 10),
   });
 }

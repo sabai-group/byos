@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import { Client, LocalAuth, type Message } from "whatsapp-web.js";
 
 import { config } from "./config";
-import type { AttachmentManifest } from "./relay";
+import type { RelayedAttachment } from "./relay";
 
 const execFileAsync = promisify(execFile);
 
@@ -68,7 +68,7 @@ interface WhatsAppBatch {
   from: string;
   to?: string;
   messages: Array<Record<string, unknown>>;
-  attachmentManifests: AttachmentManifest[];
+  attachments: RelayedAttachment[];
   timer?: NodeJS.Timeout;
 }
 
@@ -104,7 +104,7 @@ export interface WhatsAppLinkState {
 }
 
 export async function startWhatsAppService(options: {
-  onBatch: (batch: { from: string; to?: string; text: string; messages: Array<Record<string, unknown>>; attachmentManifests: AttachmentManifest[]; metadata: Record<string, unknown> }) => Promise<void>;
+  onBatch: (batch: { from: string; to?: string; text: string; messages: Array<Record<string, unknown>>; attachments: RelayedAttachment[]; metadata: Record<string, unknown> }) => Promise<void>;
   onQrReady: (qrDataUrl: string) => Promise<void>;
 }): Promise<WhatsAppService> {
   const batches = new Map<string, WhatsAppBatch>();
@@ -346,7 +346,7 @@ export async function startWhatsAppService(options: {
       to: batch.to,
       text,
       messages: batch.messages,
-      attachmentManifests: batch.attachmentManifests,
+      attachments: batch.attachments,
       metadata: {
         waid: batch.from.replace(/\D/g, "") || "redacted",
       },
@@ -487,13 +487,19 @@ export async function startWhatsAppService(options: {
         clearTimeout(existing.timer);
       }
 
-      const attachmentManifests = existing?.attachmentManifests ?? [];
+      const attachments = existing?.attachments ?? [];
       if (message.hasMedia) {
-        const data = (message as unknown as { _data?: Record<string, unknown> })._data ?? {};
-        attachmentManifests.push({
-          filename: typeof data.filename === "string" ? data.filename : `${path.basename(batchKey)}-media.bin`,
-          contentType: typeof data.mimetype === "string" ? data.mimetype : undefined,
-        });
+        try {
+          const media = await message.downloadMedia();
+          if (media?.data) {
+            attachments.push({
+              contentBase64: media.data,
+              contentType: media.mimetype ?? "application/octet-stream",
+            });
+          }
+        } catch (error) {
+          console.error("[byos:whatsapp] Failed to download media, skipping attachment", error);
+        }
       }
 
       const batch: WhatsAppBatch = {
@@ -510,7 +516,7 @@ export async function startWhatsAppService(options: {
             hasMedia: message.hasMedia,
           },
         ],
-        attachmentManifests,
+        attachments,
       };
 
       batch.timer = setTimeout(() => {

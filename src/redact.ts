@@ -1,7 +1,7 @@
 /**
  * Scrubs supplier-identifying strings from message bodies (subject/text/html) before relay so Sabai
- * ingest does not see those names in content. The canonical supplier id is encrypted separately on
- * relay (AES-GCM with a key that Sabai does not hold). Relay auth uses SABAI_API_KEY over HTTPS.
+ * ingest does not see those names in content. The relay sends the Sabai-side supplier ID (numeric)
+ * rather than any form of the supplier name. Relay auth uses SABAI_API_KEY over HTTPS.
  */
 import OpenAI from "openai";
 
@@ -9,6 +9,7 @@ import { config } from "./config";
 import type { SupplierRecord, SupplierRoster } from "./suppliers";
 
 export interface SupplierMatch {
+  supplierId: string;
   canonicalName: string;
   matchedAlias?: string;
   confidence?: number;
@@ -280,6 +281,7 @@ export async function detectAndRedactEmail(
 
   return {
     supplierMatch: {
+      supplierId: supplier.id,
       canonicalName: supplier.canonicalName,
       matchedAlias: aiResult?.matchedAlias,
       confidence: aiResult?.confidence,
@@ -319,6 +321,7 @@ export async function detectAndRedactWhatsApp(
 
   return {
     supplierMatch: {
+      supplierId: supplier.id,
       canonicalName: supplier.canonicalName,
       matchedAlias: aiResult?.matchedAlias,
       confidence: aiResult?.confidence,

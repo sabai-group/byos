@@ -27,7 +27,7 @@ async function main() {
         to: batch.to,
         text: redacted.redactedText,
         messages: redacted.redactedMessages,
-        attachmentManifests: batch.attachmentManifests,
+        attachments: batch.attachments,
         metadata: {
           ...batch.metadata,
           waid: "redacted",
@@ -62,7 +62,7 @@ async function main() {
         subject: redacted.redactedSubject,
         text: redacted.redactedText,
         html: redacted.redactedHtml,
-        attachmentManifests: email.attachmentManifests,
+        attachments: email.attachments,
         metadata: {
           byos_received_at: new Date().toISOString(),
         },

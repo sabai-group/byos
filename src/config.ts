@@ -20,7 +20,7 @@ export const config = {
   /** Customer-specific API key from Sabai `customer` table; sent as X-BYOS-API-Key over HTTPS. */
   sabaiApiKey: process.env.SABAI_API_KEY ?? "",
   /**
-   * AES-256-SIV key material for deterministic encryption of canonical supplier names.
+   * AES-256-GCM key material for encrypting supplier names stored in Sabai's DB.
    * Must not be configured on Sabai — only BYOS (and optional downstream decryptors) should have it.
    */
   supplierEncryptionKey: process.env.SECRET_ENCRYPTION_KEY ?? "",

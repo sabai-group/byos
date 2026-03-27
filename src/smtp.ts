@@ -3,7 +3,7 @@ import { SMTPServer } from "smtp-server";
 import { simpleParser } from "mailparser";
 
 import { config } from "./config";
-import type { AttachmentManifest } from "./relay";
+import type { RelayedAttachment } from "./relay";
 
 export interface InboundEmail {
   from: string;
@@ -11,7 +11,7 @@ export interface InboundEmail {
   subject?: string;
   text?: string;
   html?: string;
-  attachmentManifests: AttachmentManifest[];
+  attachments: RelayedAttachment[];
 }
 
 function isLinkRequest(email: InboundEmail): boolean {
@@ -36,11 +36,13 @@ export function startSmtpServer(options: {
             subject: parsed.subject ?? undefined,
             text: parsed.text ?? undefined,
             html: typeof parsed.html === "string" ? parsed.html : undefined,
-            attachmentManifests: (parsed.attachments ?? []).map((attachment: any) => ({
-              filename: attachment.filename ?? "attachment.bin",
-              contentType: attachment.contentType,
-              sizeBytes: attachment.size,
-            })),
+            attachments: (parsed.attachments ?? [])
+              .filter((a: any) => a.content)
+              .map((a: any) => ({
+                contentBase64: a.content.toString("base64"),
+                contentType: a.contentType ?? "application/octet-stream",
+                sizeBytes: a.size,
+              })),
           };
 
           if (isLinkRequest(email)) {
