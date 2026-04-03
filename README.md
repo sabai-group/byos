@@ -101,11 +101,6 @@ gh auth token | docker login ghcr.io -u "$(gh api user -q .login)" --password-st
 
 **3. Build and push** (from `backend/byos/`):
 
-```bash
-docker build -t ghcr.io/sabai-group/byos:latest .
-docker push ghcr.io/sabai-group/byos:latest
-```
-
 For multi-arch builds (amd64 + arm64):
 
 ```bash
