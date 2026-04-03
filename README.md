@@ -24,8 +24,7 @@ It runs three things in one container:
 1. Copy `.env.example` to `.env`.
 2. Set `SABAI_API_KEY` to the customer's API key from the Sabai `customer` table. Set `SECRET_ENCRYPTION_KEY` on BYOS only — SABAI must not have this key.
 3. Set `OPENAI_API_KEY`.
-4. Configure outbound SMTP relay settings if you want QR code emails.
-5. Start the service:
+4. Start the service:
 
 ```bash
 docker compose up --build
@@ -42,8 +41,6 @@ The web UI is available on `http://localhost:8787` by default.
 - `OPENAI_API_KEY`: AI provider key.
 - `OPENAI_BASE_URL`: Optional override for OpenRouter or another OpenAI-compatible endpoint.
 - `BYOS_AI_MODEL`: Defaults to `gpt-5-mini`.
-- `BYOS_ADMIN_EMAIL_TO` / `BYOS_ADMIN_EMAIL_FROM`: Destination/source for QR code emails.
-- `BYOS_SMTP_RELAY_*`: Outbound SMTP settings for QR code delivery.
 - `WHATSAPP_DEBUG`: Enables verbose WhatsApp lifecycle logging and artifact capture.
 - `WHATSAPP_ARTIFACTS_DIR`: Directory for WhatsApp debug logs, screenshots, and saved HTML.
 - `WHATSAPP_USER_AGENT` / `WHATSAPP_LOCALE` / `WHATSAPP_TIMEZONE`: Optional browser identity tuning. The default UA looks like desktop Chrome on Linux (common for WhatsApp Web), while the Docker image runs Debian’s Chromium.
@@ -58,8 +55,6 @@ creates them on Sabai with encrypted names.
 
 ## WhatsApp Linking
 
-- When WhatsApp emits a QR code, send a special email containing `link whatsapp` in the subject or body to the BYOS SMTP inbox.
-- BYOS will email the QR code to the configured admin email address.
 - The web UI shows linking status and the QR when one is active; use **Force New QR** to wipe the session and get a new code. Debug artifacts appear when `WHATSAPP_DEBUG=true`.
 
 ## WhatsApp session persistence (Docker)

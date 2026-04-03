@@ -1,7 +1,6 @@
 import type { Server as HttpServer } from "http";
 
 import { validateConfig, config } from "./config";
-import { sendQrCodeEmail } from "./mailer";
 import { detectAndRedactEmail, detectAndRedactWhatsApp, redactAttachments } from "./redact";
 import { relayEmail, relayWhatsApp } from "./relay";
 import { startSmtpServer } from "./smtp";
@@ -14,7 +13,6 @@ async function main() {
   let shuttingDown = false;
 
   const whatsappService = await startWhatsAppService({
-    onQrReady: sendQrCodeEmail,
     onBatch: async (batch) => {
       const roster = await fetchRosterFromSabai();
       const redacted = await detectAndRedactWhatsApp(roster, {
@@ -51,9 +49,6 @@ async function main() {
   });
 
   const smtpServer = await startSmtpServer({
-    onLinkRequest: async () => {
-      await whatsappService.requestQrEmail();
-    },
     onEmail: async (email) => {
       const roster = await fetchRosterFromSabai();
       const redacted = await detectAndRedactEmail(roster, email);

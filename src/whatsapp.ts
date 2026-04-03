@@ -73,7 +73,6 @@ interface WhatsAppBatch {
 }
 
 export interface WhatsAppService {
-  requestQrEmail: () => Promise<void>;
   forceQrForWeb: () => Promise<WhatsAppLinkState>;
   getLinkState: () => WhatsAppLinkState;
   shutdown: () => Promise<void>;
@@ -87,7 +86,6 @@ export interface WhatsAppLinkState {
   resetting: boolean;
   qrAvailable: boolean;
   qrDataUrl: string | null;
-  waitingForQr: boolean;
   status: string;
   lastEvent: string | null;
   lastEventAt: string | null;
@@ -105,7 +103,6 @@ export interface WhatsAppLinkState {
 
 export async function startWhatsAppService(options: {
   onBatch: (batch: { from: string; to?: string; text: string; messages: Array<Record<string, unknown>>; attachments: RelayedAttachment[]; metadata: Record<string, unknown> }) => Promise<void>;
-  onQrReady: (qrDataUrl: string) => Promise<void>;
 }): Promise<WhatsAppService> {
   const batches = new Map<string, WhatsAppBatch>();
   const pendingQrWaiters = new Set<(state: WhatsAppLinkState) => void>();
@@ -113,7 +110,6 @@ export async function startWhatsAppService(options: {
 
   let client: Client | null = null;
   let latestQrDataUrl: string | null = null;
-  let emailQrRequested = false;
   let isReady = false;
   /** True after `authenticated` until `ready` (or reset by qr / failure / disconnect). */
   let pairingInProgress = false;
@@ -262,7 +258,6 @@ export async function startWhatsAppService(options: {
       resetting: forceResetInProgress,
       qrAvailable: Boolean(latestQrDataUrl),
       qrDataUrl: latestQrDataUrl,
-      waitingForQr: !isReady && !latestQrDataUrl && emailQrRequested,
       status,
       lastEvent,
       lastEventAt,
@@ -397,10 +392,6 @@ export async function startWhatsAppService(options: {
       latestQrDataUrl = await QRCode.toDataURL(qr, { errorCorrectionLevel: "M" });
       lastError = null;
       markEvent("qr", { qrLength: qr.length });
-      if (emailQrRequested) {
-        emailQrRequested = false;
-        await options.onQrReady(latestQrDataUrl);
-      }
     });
 
     activeClient.on("authenticated", () => {
@@ -417,7 +408,6 @@ export async function startWhatsAppService(options: {
       pairingInProgress = false;
       status = "ready";
       latestQrDataUrl = null;
-      emailQrRequested = false;
       lastError = null;
       markEvent("ready");
     });
@@ -737,15 +727,6 @@ export async function startWhatsAppService(options: {
   await confirmStartupRestore(authStoreBeforeLaunch);
 
   return {
-    async requestQrEmail() {
-      if (latestQrDataUrl) {
-        await options.onQrReady(latestQrDataUrl);
-        return;
-      }
-      emailQrRequested = true;
-      status = "waiting_for_qr";
-      markEvent("request_qr_email");
-    },
     async forceQrForWeb() {
       const hadActiveSession = isReady;
       forceResetInProgress = true;
@@ -756,7 +737,6 @@ export async function startWhatsAppService(options: {
       userAgent = null;
       isReady = false;
       pairingInProgress = false;
-      emailQrRequested = false;
       markEvent("force_new_qr_requested", { hadActiveSession });
       try {
         await destroyCurrentClient({ logout: hadActiveSession });

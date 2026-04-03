@@ -24,7 +24,6 @@ function toPublicWhatsAppState(state: WhatsAppLinkState) {
     resetting: state.resetting,
     qrAvailable: showQr,
     qrDataUrl: showQr ? state.qrDataUrl : null,
-    waitingForQr: state.waitingForQr,
     hasError: Boolean(state.lastError),
   };
 }

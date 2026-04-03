@@ -14,15 +14,8 @@ export interface InboundEmail {
   attachments: RelayedAttachment[];
 }
 
-function isLinkRequest(email: InboundEmail): boolean {
-  const subject = (email.subject ?? "").toLowerCase();
-  const text = (email.text ?? "").toLowerCase();
-  return subject.includes("link whatsapp") || text.includes("link whatsapp");
-}
-
 export function startSmtpServer(options: {
   onEmail: (email: InboundEmail) => Promise<void>;
-  onLinkRequest: (email: InboundEmail) => Promise<void>;
 }): Promise<any> {
   const server = new SMTPServer({
     disabledCommands: ["AUTH", "STARTTLS"],
@@ -45,11 +38,7 @@ export function startSmtpServer(options: {
               })),
           };
 
-          if (isLinkRequest(email)) {
-            await options.onLinkRequest(email);
-          } else {
-            await options.onEmail(email);
-          }
+          await options.onEmail(email);
           callback();
         })
         .catch((error: unknown) => callback(error instanceof Error ? error : new Error(String(error))));

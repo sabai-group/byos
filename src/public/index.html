@@ -350,11 +350,7 @@
 
         hideWhatsappQr();
         whatsappPrev = { ready: false, pairing: false, hadQr };
-        if (state.waitingForQr) {
-          whatsappStatus.textContent =
-            "A QR code is being sent by email (link request). This page will refresh automatically, or click Refresh Status.";
-          whatsappStatus.className = "status";
-        } else if (state.hasError) {
+        if (state.hasError) {
           whatsappStatus.textContent = "WhatsApp needs attention. Check the container logs.";
           whatsappStatus.className = "status error";
         } else {
