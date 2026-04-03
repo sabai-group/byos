@@ -1,0 +1,15 @@
+# Secrets (never bake into image layers if COPY scope widens)
+.env
+
+# Dependencies and build output (rebuilt in Dockerfile)
+node_modules
+dist
+
+# Git and editor
+.git
+.gitignore
+.dockerignore
+
+# Local / docs not needed in image
+*.md
+docs

@@ -12,22 +12,22 @@ BYOS_ADMIN_PASSWORD=""        # Password for the BYOS web interface
 SABAI_API_KEY=""              # Your SABAI API key (from your account manager)
 OPENAI_API_KEY=""             # Your OpenAI API key
 
-# Optional: leave blank to auto-generate a secure key
+# Any strong secret (UTF-8); BYOS SHA-256-hashes it for AES-256-GCM. Example: openssl rand -hex 32
 SECRET_ENCRYPTION_KEY=""
 
 # ---- END OF YOUR DETAILS ----
 
 
 set -e
+if [ -z "$SECRET_ENCRYPTION_KEY" ]; then
+  echo "BYOS startup error: SECRET_ENCRYPTION_KEY is required." >&2
+  echo "Use a long random value (e.g. openssl rand -hex 32)." >&2
+  echo "Paste the output into startup.sh and redeploy." >&2
+  exit 1
+fi
 exec > /var/log/byos-startup.log 2>&1
 
 echo "=== BYOS startup: $(date) ==="
-
-# Auto-generate SECRET_ENCRYPTION_KEY if not provided
-if [ -z "$SECRET_ENCRYPTION_KEY" ]; then
-  SECRET_ENCRYPTION_KEY=$(openssl rand -hex 32)
-  echo "Generated SECRET_ENCRYPTION_KEY"
-fi
 
 # Install Docker
 echo "Installing Docker..."
@@ -38,7 +38,8 @@ systemctl start docker
 # Configure firewall
 echo "Configuring firewall..."
 ufw allow OpenSSH
-ufw allow 8787/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
 ufw allow 2525/tcp
 ufw --force enable
 
@@ -48,7 +49,6 @@ cd /opt/byos
 
 # Write .env
 cat > .env <<EOF
-BYOS_PORT=8787
 BYOS_SMTP_PORT=2525
 BYOS_ADMIN_PASSWORD=${BYOS_ADMIN_PASSWORD}
 
@@ -72,6 +72,14 @@ WHATSAPP_VIEWPORT_HEIGHT=768
 PUPPETEER_EXECUTABLE_PATH=/usr/bin/byos-browser
 EOF
 
+# Write Caddyfile — plain HTTP reverse proxy to start with.
+# Once a domain is assigned, update this file to enable HTTPS (see docs).
+cat > Caddyfile <<'EOF'
+:80 {
+    reverse_proxy byos:8787
+}
+EOF
+
 # Write docker-compose.yml (includes Watchtower for auto-updates)
 cat > docker-compose.yml <<'COMPOSE'
 services:
@@ -80,11 +88,22 @@ services:
     env_file:
       - .env
     ports:
-      - "${BYOS_PORT:-8787}:8787"
       - "${BYOS_SMTP_PORT:-2525}:2525"
+    expose:
+      - "8787"
     volumes:
       - byos_whatsapp_auth:/app/data/.wwebjs_auth
       - byos_runtime:/app/data/runtime
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
     restart: unless-stopped
 
   watchtower:
@@ -99,6 +118,7 @@ services:
 volumes:
   byos_whatsapp_auth:
   byos_runtime:
+  caddy_data:
 COMPOSE
 
 # Pull and start
@@ -107,4 +127,4 @@ docker compose pull
 docker compose up -d
 
 echo "=== BYOS startup complete: $(date) ==="
-echo "Web interface will be available at http://$(curl -s ifconfig.me):8787"
+echo "Web interface will be available at http://$(curl -s ifconfig.me)"

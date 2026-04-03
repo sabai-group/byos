@@ -31,7 +31,7 @@ Before creating the server, you need to fill in a short text file with your deta
    BYOS_ADMIN_PASSWORD=""
    SABAI_API_KEY=""
    OPENAI_API_KEY=""
-   ...
+   SECRET_ENCRYPTION_KEY=""
    ```
 
 3. Fill in each value between the quotes:
@@ -41,8 +41,7 @@ Before creating the server, you need to fill in a short text file with your deta
    | `BYOS_ADMIN_PASSWORD` | A password you'll use to log into the BYOS web interface. Make it something memorable. |
    | `SABAI_API_KEY` | Your SABAI API key from your account manager. |
    | `OPENAI_API_KEY` | Your OpenAI API key. |
-
-   The `SECRET_ENCRYPTION_KEY` can be left blank — a secure key will be generated automatically.
+   | `SECRET_ENCRYPTION_KEY` | A secret BYOS uses to encrypt supplier data. It can be any strong string (the app hashes it before encryption). Easy option: run `openssl rand -hex 32` on your computer and paste the output. **Store a copy somewhere safe** — you may need it to recover data. SABAI does not have this key. |
 
 4. Once filled in, **select all the text** in the file and copy it (`Ctrl+A` then `Ctrl+C` on Windows, `Cmd+A` then `Cmd+C` on Mac). Keep it copied — you'll paste it shortly.
 
@@ -82,7 +81,7 @@ In DigitalOcean, a server is called a **Droplet**.
 
    ![Create page](screenshots/03-create-page-top.png)
 
-3. **Region:** Choose the location closest to you or your suppliers.
+3. **Region:** Choose the location closest to you or that you prefer for regulatory reasons (e.g. GDPR)
 
    ![Region](screenshots/04-choose-region.png)
 
@@ -142,7 +141,7 @@ Once the server has had 2–3 minutes to finish starting up:
 
 1. Open a web browser and go to:
    ```
-   http://YOUR_RESERVED_IP:8787
+   http://YOUR_RESERVED_IP
    ```
    Replace `YOUR_RESERVED_IP` with the Reserved IP address from Part 4.
 
@@ -183,7 +182,7 @@ BYOS updates itself automatically. Whenever SABAI publishes an updated version, 
 
 ## Troubleshooting
 
-**Can't reach the web interface (`http://YOUR_IP:8787`)**
+**Can't reach the web interface (`http://YOUR_IP`)**
 
 The server may still be setting itself up. Wait a few more minutes and try again. If it still doesn't work after 5 minutes:
 
@@ -213,11 +212,38 @@ cat /var/log/byos-startup.log
 
 ---
 
+## Part 8 — Enable HTTPS (optional)
+
+Once your SABAI account manager has set up a subdomain for you (e.g. `yourcompany.byos.sabai.group`), you can enable HTTPS. This requires a one-time change on the server.
+
+1. Go to your DigitalOcean dashboard and click on your Droplet.
+2. Click **Console** to open a browser-based terminal.
+3. Log in as `root` with the password you set.
+4. Run these commands:
+
+   ```
+   cd /opt/byos
+   cat > Caddyfile <<'EOF'
+   yourcompany.byos.sabai.group {
+       reverse_proxy byos:8787
+   }
+   EOF
+   docker compose restart caddy
+   ```
+
+   Replace `yourcompany.byos.sabai.group` with the actual subdomain your account manager gave you.
+
+5. Wait about 30 seconds. The server will automatically obtain an SSL certificate.
+
+6. Open your browser and go to `https://yourcompany.byos.sabai.group` — you should see the login page with a padlock icon.
+
+---
+
 ## Summary
 
 | What | Value |
 |---|---|
-| Web interface | `http://YOUR_RESERVED_IP:8787` |
+| Web interface | `http://YOUR_RESERVED_IP` (or `https://YOUR_DOMAIN` after Part 8) |
 | Email (SMTP) port | `YOUR_RESERVED_IP:2525` |
 | Updates | Automatic (hourly check) |
 | Config file | `/opt/byos/.env` on the server |

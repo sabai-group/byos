@@ -38,7 +38,7 @@ The web UI is available on `http://localhost:8787` by default.
 
 - `BYOS_ADMIN_PASSWORD`: Web UI password. Defaults to `365`.
 - `SABAI_API_KEY`: Required. Customer-specific key from the Sabai `customer` table (`X-BYOS-API-Key` header). Also used to fetch the supplier roster.
-- `SECRET_ENCRYPTION_KEY`: Required on BYOS. Key used for AES-GCM encryption; never share this with SABAI.
+- `SECRET_ENCRYPTION_KEY`: Required on BYOS. Any strong string; BYOS SHA-256-hashes it for AES-256-GCM. Never share this with SABAI.
 - `SABAI_BASE_URL`: Defaults to `https://sabai365-16c4b4eee4fe.herokuapp.com`.
 - `OPENAI_API_KEY`: AI provider key.
 - `OPENAI_BASE_URL`: Optional override for OpenRouter or another OpenAI-compatible endpoint.
@@ -79,3 +79,42 @@ On auth failures or disconnects it also attempts to save:
 - the current page HTML
 
 These artifact paths are shown in the web UI under the WhatsApp Linking panel.
+
+## [DEVELOPERS] Publishing to GHCR
+
+Customer Droplets pull `ghcr.io/sabai-group/byos:latest`. After making changes, build and push a new image.
+
+**1. Give `gh` package scopes** (OAuth token must include `read:packages` and `write:packages`):
+
+```bash
+gh auth refresh -h github.com -s read:packages -s write:packages
+```
+
+Complete the browser/device flow. Check with `gh auth status` — the token line should list `read:packages` and `write:packages`.
+
+**2. Log Docker into GHCR:**
+
+```bash
+docker logout ghcr.io 2>/dev/null || true
+gh auth token | docker login ghcr.io -u "$(gh api user -q .login)" --password-stdin
+```
+
+**3. Build and push** (from `backend/byos/`):
+
+```bash
+docker build -t ghcr.io/sabai-group/byos:latest .
+docker push ghcr.io/sabai-group/byos:latest
+```
+
+For multi-arch builds (amd64 + arm64):
+
+```bash
+docker buildx build --platform linux/amd64,linux/arm64 \
+  -t ghcr.io/sabai-group/byos:latest --push .
+```
+
+The package must be **public** on GitHub (Settings → Packages → `byos` → Danger Zone → Make public) so customer Droplets can pull without authentication. Watchtower on the Droplet polls hourly and restarts with the new image automatically.
+
+### Push fails: `permission_denied: The token provided does not match expected scopes`
+
+Usually the token on disk is **stale** or **missing `write:packages`**. Run step 1 again, then **`docker logout ghcr.io`** and repeat step 2 so Docker does not reuse an old login.
