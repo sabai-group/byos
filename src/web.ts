@@ -112,8 +112,9 @@ export function createWebApp(options: {
     response.sendFile(path.join(publicDir, "index.html"));
   });
 
-  app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
+  app.use((error: unknown, request: express.Request, response: express.Response, _next: express.NextFunction) => {
     const message = error instanceof Error ? error.message : "Unknown error";
+    console.error(`[byos:http:error] ${request.method} ${request.path} — ${message}`);
     response.status(400).json({ error: message });
   });
 
