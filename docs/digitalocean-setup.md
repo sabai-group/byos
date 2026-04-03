@@ -137,7 +137,7 @@ By default your server's IP address could change if you ever need to rebuild it 
 
 ## Part 5 — Access the web interface
 
-Once the server has had 2–3 minutes to finish starting up:
+Once the server has had 5 minutes to finish starting up:
 
 1. Open a web browser and go to:
    ```
