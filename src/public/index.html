@@ -40,6 +40,20 @@
         margin-top: 0;
       }
 
+      .version-tag {
+        display: inline-block;
+        margin-left: 10px;
+        padding: 2px 8px;
+        font-size: 0.65rem;
+        font-weight: 600;
+        letter-spacing: 0.05em;
+        color: var(--accent);
+        border: 1px solid var(--accent);
+        border-radius: 999px;
+        vertical-align: middle;
+        opacity: 0.75;
+      }
+
       p {
         color: var(--muted);
       }
@@ -139,7 +153,7 @@
   <body>
     <main>
       <section id="login-panel" class="panel hidden">
-        <h1>BYOS Supplier Roster</h1>
+        <h1>BYOS Supplier Roster <span class="version-tag">v1.0</span></h1>
         <p>Enter the deployment password to view and update the supplier roster JSON.</p>
         <label for="password">Password</label>
         <input id="password" type="password" autocomplete="current-password" />
@@ -366,18 +380,28 @@
       }
 
       async function bootstrap() {
+        let authenticated = false;
         try {
           const session = await api("/api/session", { headers: {} });
-          if (session.authenticated) {
-            showApp();
-            await loadRoster();
-            await loadWhatsappStatus();
-            return;
-          }
+          authenticated = Boolean(session.authenticated);
         } catch (error) {
-          console.error(error);
+          console.error("Session check failed:", error);
         }
-        showLogin();
+        if (!authenticated) {
+          showLogin();
+          return;
+        }
+        showApp();
+        try { await loadRoster(); } catch (error) {
+          console.error("Failed to load roster:", error);
+          appStatus.textContent = "Failed to load suppliers.";
+          appStatus.className = "status error";
+        }
+        try { await loadWhatsappStatus(); } catch (error) {
+          console.error("Failed to load WhatsApp status:", error);
+          whatsappStatus.textContent = "Failed to load WhatsApp status.";
+          whatsappStatus.className = "status error";
+        }
       }
 
       document.getElementById("login-button").addEventListener("click", async () => {
@@ -388,13 +412,22 @@
             method: "POST",
             body: JSON.stringify({ password: document.getElementById("password").value }),
           });
-          showApp();
-          await loadRoster();
-          await loadWhatsappStatus();
-          loginStatus.textContent = "";
         } catch (error) {
           loginStatus.textContent = error.message;
           loginStatus.className = "status error";
+          return;
+        }
+        loginStatus.textContent = "";
+        showApp();
+        try { await loadRoster(); } catch (error) {
+          console.error("Failed to load roster:", error);
+          appStatus.textContent = "Failed to load suppliers.";
+          appStatus.className = "status error";
+        }
+        try { await loadWhatsappStatus(); } catch (error) {
+          console.error("Failed to load WhatsApp status:", error);
+          whatsappStatus.textContent = "Failed to load WhatsApp status.";
+          whatsappStatus.className = "status error";
         }
       });
 
