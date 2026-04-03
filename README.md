@@ -2,6 +2,8 @@
 
 Open-source Bring Your Own Server ingress for SABAI 365.
 
+**End-user tutorial (DigitalOcean):** [docs/digitalocean-setup.md](docs/digitalocean-setup.md) — step-by-step setup with screenshots; [`docs/startup.sh`](docs/startup.sh) is the Droplet cloud-init script referenced there.
+
 It runs three things in one container:
 
 - a small SMTP server for inbound offer emails,
