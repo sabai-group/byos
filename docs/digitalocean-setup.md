@@ -5,7 +5,7 @@ This guide walks you through getting BYOS (Bring Your Own Server) running on Dig
 
 **Files in this folder:** [`startup.sh`](startup.sh) — fill in your keys, then paste the whole script into DigitalOcean **User Data** (see Part 3).
 
-**Time needed:** About 15 minutes  
+**Time needed:** About 15-30 minutes  
 **Technical skill required:** None — just follow the steps  
 **Ongoing maintenance:** None — BYOS updates itself automatically
 
@@ -166,7 +166,7 @@ Once linked, you'll see a confirmation in the web interface. Your WhatsApp sessi
 
 ## Part 7 — Set up inbound email
 
-For BYOS to receive supplier offer emails, SABAI will configure a subdomain (e.g., `yourcompany.sabai.group`) to route email to your server. You need to send your **Reserved IP address** from Part 4 to your SABAI account manager so they can set up the MX record.
+For BYOS to receive supplier offer emails, SABAI will configure a subdomain (e.g., `yourcompany.sabai.group`) that points directly to your server. You need to send your **Reserved IP address** from Part 4 to your SABAI account manager so they can set up the MX record.
 
 Once configured, your suppliers will send offer emails to an address at your subdomain (e.g., `offers@yourcompany.sabai.group`), and BYOS will receive and process them automatically.
 
@@ -214,28 +214,28 @@ cat /var/log/byos-startup.log
 
 ## Part 8 — Enable HTTPS (optional)
 
-Once your SABAI account manager has set up a subdomain for you (e.g. `yourcompany.byos.sabai.group`), you can enable HTTPS. This requires a one-time change on the server.
+Once your SABAI account manager has set up a subdomain for you (e.g. `yourcompany.sabai.group`), you can enable HTTPS. This requires a one-time change on the server.
 
 1. Go to your DigitalOcean dashboard and click on your Droplet.
 2. Click **Console** to open a browser-based terminal.
-3. Log in as `root` with the password you set.
+3. It should log you in automatically. If not, enter your server password
 4. Run these commands:
 
    ```
    cd /opt/byos
    cat > Caddyfile <<'EOF'
-   yourcompany.byos.sabai.group {
+   yourcompany.sabai.group {
        reverse_proxy byos:8787
    }
    EOF
    docker compose restart caddy
    ```
 
-   Replace `yourcompany.byos.sabai.group` with the actual subdomain your account manager gave you.
+   Replace `yourcompany.sabai.group` with the actual subdomain your account manager gave you.
 
 5. Wait about 30 seconds. The server will automatically obtain an SSL certificate.
 
-6. Open your browser and go to `https://yourcompany.byos.sabai.group` — you should see the login page with a padlock icon.
+6. Open your browser and go to `https://yourcompany.sabai.group` — you should see the login page with a padlock icon.
 
 ---
 
