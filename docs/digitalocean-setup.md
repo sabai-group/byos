@@ -170,7 +170,7 @@ For BYOS to receive supplier offer emails, SABAI will configure a subdomain (e.g
 
 Once configured, your suppliers will send offer emails to an address at your subdomain (e.g., `offers@yourcompany.sabai365.ai`), and BYOS will receive and process them automatically.
 
-> **Action required:** Send your Reserved IP address to your SABAI account manager. They will configure the email routing for you and confirm when it's ready. Your server listens for inbound email on port `2525`.
+> **Action required:** Send your Reserved IP address to your SABAI account manager. They will configure the email routing for you and confirm when it's ready. Your server listens for inbound email on port `25` (standard SMTP).
 
 ---
 
@@ -244,7 +244,7 @@ Once your SABAI account manager has set up a subdomain for you (e.g. `yourcompan
 | What | Value |
 |---|---|
 | Web interface | `http://YOUR_RESERVED_IP` (or `https://YOUR_DOMAIN` after Part 8) |
-| Email (SMTP) port | `YOUR_RESERVED_IP:2525` |
+| Email (SMTP) port | `YOUR_RESERVED_IP:25` (standard SMTP) |
 | Updates | Automatic (hourly check) |
 | Config file | `/opt/byos/.env` on the server |
 | Startup log | `/var/log/byos-startup.log` |

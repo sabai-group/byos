@@ -40,7 +40,7 @@ echo "Configuring firewall..."
 ufw allow OpenSSH
 ufw allow 80/tcp
 ufw allow 443/tcp
-ufw allow 2525/tcp
+ufw allow 25/tcp
 ufw --force enable
 
 # Create app directory
@@ -88,7 +88,7 @@ services:
     env_file:
       - .env
     ports:
-      - "${BYOS_SMTP_PORT:-2525}:2525"
+      - "25:2525"
     expose:
       - "8787"
     volumes:
