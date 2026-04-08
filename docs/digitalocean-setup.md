@@ -166,9 +166,9 @@ Once linked, you'll see a confirmation in the web interface. Your WhatsApp sessi
 
 ## Part 7 — Set up inbound email
 
-For BYOS to receive supplier offer emails, SABAI will configure a subdomain (e.g., `yourcompany.sabai.group`) that points directly to your server. You need to send your **Reserved IP address** from Part 4 to your SABAI account manager so they can set up the MX record.
+For BYOS to receive supplier offer emails, SABAI will configure a subdomain (e.g., `yourcompany.sabai365.ai`) that points directly to your server. You need to send your **Reserved IP address** from Part 4 to your SABAI account manager so they can set up the MX record.
 
-Once configured, your suppliers will send offer emails to an address at your subdomain (e.g., `offers@yourcompany.sabai.group`), and BYOS will receive and process them automatically.
+Once configured, your suppliers will send offer emails to an address at your subdomain (e.g., `offers@yourcompany.sabai365.ai`), and BYOS will receive and process them automatically.
 
 > **Action required:** Send your Reserved IP address to your SABAI account manager. They will configure the email routing for you and confirm when it's ready. Your server listens for inbound email on port `2525`.
 
@@ -214,7 +214,7 @@ cat /var/log/byos-startup.log
 
 ## Part 8 — Enable HTTPS (optional)
 
-Once your SABAI account manager has set up a subdomain for you (e.g. `yourcompany.sabai.group`), you can enable HTTPS. This requires a one-time change on the server.
+Once your SABAI account manager has set up a subdomain for you (e.g. `yourcompany.sabai365.ai`), you can enable HTTPS. This requires a one-time change on the server.
 
 1. Go to your DigitalOcean dashboard and click on your Droplet.
 2. Click **Console** to open a browser-based terminal.
@@ -224,18 +224,18 @@ Once your SABAI account manager has set up a subdomain for you (e.g. `yourcompan
    ```
    cd /opt/byos
    cat > Caddyfile <<'EOF'
-   yourcompany.sabai.group {
-       reverse_proxy byos:8787
+   yourcompany.sabai365.ai {
+      reverse_proxy byos:8787
    }
    EOF
    docker compose restart caddy
    ```
 
-   Replace `yourcompany.sabai.group` with the actual subdomain your account manager gave you.
+   Replace `yourcompany.sabai365.ai` with the actual subdomain your account manager gave you.
 
 5. Wait about 30 seconds. The server will automatically obtain an SSL certificate.
 
-6. Open your browser and go to `https://yourcompany.sabai.group` — you should see the login page with a padlock icon.
+6. Open your browser and go to `https://yourcompany.sabai365.ai` — you should see the login page with a padlock icon.
 
 ---
 
