@@ -38,6 +38,10 @@ export function startSmtpServer(options: {
               })),
           };
 
+          console.log(
+            `[byos:smtp] received from=${email.from} to=${email.to ?? "(none)"} subject=${email.subject ?? "(none)"} attachments=${email.attachments.length}`,
+          );
+
           await options.onEmail(email);
           callback();
         })
