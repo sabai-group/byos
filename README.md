@@ -127,16 +127,16 @@ The package must be **public** on GitHub (Settings → Packages → `byos` → D
 
 ### Faster: build on Google Cloud Build
 
-If your local upload is slow, run the multi-arch build on Cloud Build (project `mr-stanley`, already configured with the `ghcr-token` secret). From this directory:
+If your local upload is slow, run the multi-arch build on Cloud Build. From this directory:
 
 ```bash
-gcloud builds submit --config cloudbuild.yaml --project=mr-stanley
+gcloud builds submit --config cloudbuild.yaml --project=<PROJECT>
 ```
 
 If your `gh` token rotates, refresh the secret:
 
 ```bash
-gh auth token | gcloud secrets versions add ghcr-token --data-file=- --project=mr-stanley
+gh auth token | gcloud secrets versions add ghcr-token --data-file=- --project=<PROJECT>
 ```
 
 ### Push fails: `permission_denied: The token provided does not match expected scopes`
