@@ -3,6 +3,12 @@
  * so Sabai ingest does not see those names in content. The relay sends the Sabai-side contact ID
  * (numeric) rather than any form of the contact name. Relay auth uses SABAI_API_KEY over HTTPS.
  *
+ * The `from` header is intentionally passed through unchanged. The sender on offers@/requests@
+ * (and on forwarded WhatsApp threads) is intended to be an internal employee of the BYOS
+ * customer relaying a supplier/buyer message, NOT the supplier/buyer themselves — keeping it
+ * lets Sabai attribute the inbound to the human who actioned it. Any supplier/buyer identity
+ * embedded inside the quoted thread body is still scrubbed via the redaction rules below.
+ *
  * Kind-aware: the same pipeline is used for both "supplier" (offer lists from sellers) and
  * "buyer" (request lists from customers). The AI system prompt and the redaction label differ
  * per kind; on a miss we always return a `RedactionMiss` sentinel so callers can bounce
@@ -216,16 +222,25 @@ function aiSystemPrompt(kind: ContactKind): string {
       + "copied verbatim from the provided input. Never use regex syntax. If the buyer name is short or "
       + "ambiguous, expand the needle with nearby words so it uniquely targets the buyer mention. Each "
       + `replacement must preserve the surrounding text and replace only the buyer-identifying portion with ${label}. `
+      + "Do NOT emit redactions that target the outer sender's name or email address — that sender is "
+      + "the relaying employee and must pass through unchanged. "
       + "Use an empty redactions array when no redaction is needed."
     );
   }
   return (
-    "You identify which supplier sent a message and produce exact literal redaction rules. "
-    + "canonicalName must exactly match one supplier from the roster or be null. Each redaction must be a "
-    + "literal case-sensitive substring copied verbatim from the provided input. Never use regex syntax. "
-    + "If the supplier name is short or ambiguous, expand the needle with nearby words so it uniquely "
-    + "targets the supplier mention. Each replacement must preserve the surrounding text and replace only "
-    + `the supplier-identifying portion with ${label}. Use an empty redactions array when no redaction is needed.`
+    "You identify which supplier (the seller the offer is from) is referenced in a message and "
+    + "produce exact literal redaction rules. The SUPPLIER IS USUALLY NOT THE SENDER — the sender is "
+    + "typically an internal employee forwarding a supplier's offer list. Look at quoted/forwarded "
+    + "thread headers ('From: ...', 'Sent by ...'), email signatures, file/attachment names, and "
+    + "explicit mentions in the body to identify the supplier. Do not assume the From: address of the "
+    + "outermost message is the supplier. canonicalName must exactly match one supplier from the "
+    + "roster or be null when ambiguous or unknown — do NOT guess. Each redaction must be a literal "
+    + "case-sensitive substring copied verbatim from the provided input. Never use regex syntax. If "
+    + "the supplier name is short or ambiguous, expand the needle with nearby words so it uniquely "
+    + "targets the supplier mention. Each replacement must preserve the surrounding text and replace "
+    + `only the supplier-identifying portion with ${label}. Do NOT emit redactions that target the `
+    + "outer sender's name or email address — that sender is the relaying employee and must pass "
+    + "through unchanged. Use an empty redactions array when no redaction is needed."
   );
 }
 
@@ -360,10 +375,10 @@ export async function detectAndRedactEmail(
       confidence: aiResult?.confidence,
       reasoning: aiResult?.reasoning,
     },
-    redactedFrom:
-      roster.kind === "buyer"
-        ? "Buyer Redacted <redacted@byos.invalid>"
-        : "Supplier Redacted <redacted@byos.invalid>",
+    // Pass the sender through unchanged: it identifies the employee who relayed
+    // the message to BYOS, which Sabai needs for attribution. Supplier/buyer
+    // identity that may also live inside the body is still scrubbed below.
+    redactedFrom: email.from,
     redactedSubject: redactText(email.subject, redactions),
     redactedText: redactText(email.text, redactions),
     redactedHtml: redactText(email.html, redactions),
@@ -392,9 +407,11 @@ export async function detectAndRedactWhatsApp(
     ),
   ]);
   const redactedText = redactText(payload.text, redactions);
+  // Per-message `from` is left intact: WhatsApp forwards rarely carry the
+  // original sender's identity anyway, and when present it's the relaying
+  // employee — same rationale as the email path above.
   const redactedMessages = payload.messages.map((message) => ({
     ...message,
-    // from: "whatsapp:byos-redacted", // the original from is probably not the contact, just an employee of the client
     text: typeof message.text === "string" ? redactText(message.text, redactions) : message.text,
   }));
   console.log("redactedText", redactedText);
@@ -410,7 +427,7 @@ export async function detectAndRedactWhatsApp(
       confidence: aiResult?.confidence,
       reasoning: aiResult?.reasoning,
     },
-    redactedFrom: "whatsapp:byos-redacted",
+    redactedFrom: payload.from,
     redactedText,
     redactedMessages,
   };
