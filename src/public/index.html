@@ -98,6 +98,19 @@
         color: var(--text);
       }
 
+      button.danger {
+        background: transparent;
+        color: var(--danger);
+        border-color: rgba(239, 68, 68, 0.4);
+      }
+
+      button.row-action {
+        width: auto;
+        margin-top: 0;
+        padding: 6px 12px;
+        font-size: 0.85rem;
+      }
+
       .row {
         display: flex;
         gap: 12px;
@@ -233,6 +246,7 @@
                 <thead>
                   <tr>
                     <th style="text-align:left;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.12);">Name</th>
+                    <th style="text-align:right;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.12);width:1%;">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="contact-tbody"></tbody>
@@ -373,6 +387,27 @@
         newContactInput.placeholder = copy.placeholder;
       }
 
+      async function deleteContact(id, name) {
+        const copy = KIND_COPY[currentKind];
+        const label = copy.title.toLowerCase();
+        if (!window.confirm(`Delete ${label} "${name}"? This cannot be undone.`)) {
+          return;
+        }
+        appStatus.textContent = `Deleting ${label} "${name}"…`;
+        appStatus.className = "status";
+        try {
+          await api(`/api/contacts/${encodeURIComponent(id)}?kind=${encodeURIComponent(currentKind)}`, {
+            method: "DELETE",
+          });
+          appStatus.textContent = `Deleted ${label} "${name}".`;
+          appStatus.className = "status success";
+          await loadRoster();
+        } catch (error) {
+          appStatus.textContent = `Failed to delete ${label} "${name}": ${error.message}`;
+          appStatus.className = "status error";
+        }
+      }
+
       async function loadRoster() {
         const copy = KIND_COPY[currentKind];
         const roster = await api(`/api/roster?kind=${encodeURIComponent(currentKind)}`);
@@ -384,6 +419,17 @@
           tdName.style.cssText = "padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.06);";
           tdName.textContent = s.canonicalName;
           tr.appendChild(tdName);
+
+          const tdActions = document.createElement("td");
+          tdActions.style.cssText = "padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.06);text-align:right;white-space:nowrap;";
+          const deleteBtn = document.createElement("button");
+          deleteBtn.type = "button";
+          deleteBtn.className = "danger row-action";
+          deleteBtn.textContent = "Delete";
+          deleteBtn.addEventListener("click", () => deleteContact(s.id, s.canonicalName));
+          tdActions.appendChild(deleteBtn);
+          tr.appendChild(tdActions);
+
           contactTbody.appendChild(tr);
         }
         appStatus.textContent = `Loaded ${rows.length} ${copy.titlePlural.toLowerCase()}.`;

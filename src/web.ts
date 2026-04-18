@@ -59,6 +59,33 @@ async function postContactToSabai(
   return response.json();
 }
 
+async function deleteContactFromSabai(
+  kind: ContactKind,
+  id: string,
+): Promise<unknown> {
+  const response = await fetch(`${config.sabaiBaseUrl}${rosterPath(kind)}/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: { "X-BYOS-API-Key": config.sabaiApiKey },
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    // Surface Sabai's JSON `detail` when present so the UI shows the real
+    // reason (e.g. FK conflict) instead of a generic status string.
+    let message = `Sabai returned ${response.status}: ${text}`;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && typeof parsed.detail === "string") {
+        message = parsed.detail;
+      }
+    } catch {
+      /* keep raw text */
+    }
+    throw new Error(message);
+  }
+  if (response.status === 204) return { status: "deleted" };
+  return response.json();
+}
+
 export function createWebApp(options: {
   getWhatsAppLinkState: () => WhatsAppLinkState;
   forceWhatsAppLink: () => Promise<WhatsAppLinkState>;
@@ -124,6 +151,26 @@ export function createWebApp(options: {
       }
       const encrypted = encryptContactName(name.trim());
       const result = await postContactToSabai(kind, encrypted);
+      response.json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  /**
+   * Delete a contact (supplier or buyer) on Sabai. The `:id` is the numeric
+   * Sabai row id surfaced by GET /api/roster.
+   */
+  app.delete("/api/contacts/:id", requireSession, async (request, response, next) => {
+    try {
+      const kind = parseContactKind(request.query.kind);
+      const rawId = request.params.id;
+      const id = Array.isArray(rawId) ? rawId[0] : rawId;
+      if (!id) {
+        response.status(400).json({ error: "id is required" });
+        return;
+      }
+      const result = await deleteContactFromSabai(kind, id);
       response.json(result);
     } catch (error) {
       next(error);
