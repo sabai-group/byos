@@ -20,10 +20,10 @@ export const config = {
   /** Customer-specific API key from Sabai `customer` table; sent as X-BYOS-API-Key over HTTPS. */
   sabaiApiKey: process.env.SABAI_API_KEY ?? "",
   /**
-   * AES-256-GCM key material for encrypting supplier names stored in Sabai's DB.
+   * AES-256-GCM key material for encrypting contact (supplier/buyer) names stored in Sabai's DB.
    * Must not be configured on Sabai — only BYOS (and optional downstream decryptors) should have it.
    */
-  supplierEncryptionKey: process.env.SECRET_ENCRYPTION_KEY ?? "",
+  contactEncryptionKey: process.env.SECRET_ENCRYPTION_KEY ?? "",
   sabaiBaseUrl: process.env.SABAI_BASE_URL ?? "https://sabai365-16c4b4eee4fe.herokuapp.com",
   aiApiKey: process.env.OPENAI_API_KEY ?? "",
   aiBaseUrl: process.env.OPENAI_BASE_URL ?? undefined,
@@ -36,6 +36,15 @@ export const config = {
     process.env.WHATSAPP_ARTIFACTS_DIR ?? path.resolve(process.cwd(), "data", "runtime", "whatsapp"),
   whatsappLocale: process.env.WHATSAPP_LOCALE ?? "en-US",
   whatsappTimezone: process.env.WHATSAPP_TIMEZONE ?? "UTC",
+  /**
+   * Which contact roster WhatsApp inbound batches should be matched against.
+   * "supplier" (default) — offers from sellers; "buyer" — request lists from customers.
+   * WhatsApp uses a single channel per deployment, so this is configured at deploy time
+   * rather than inferred per message.
+   */
+  whatsappContactKind: ((process.env.BYOS_WHATSAPP_KIND ?? "supplier").toLowerCase() === "buyer"
+    ? "buyer"
+    : "supplier") as "supplier" | "buyer",
   whatsappUserAgent:
     process.env.WHATSAPP_USER_AGENT ??
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36",
@@ -49,10 +58,10 @@ export function validateConfig(): void {
   if (!config.sabaiApiKey) {
     throw new Error("SABAI_API_KEY is required (must match a Sabai-accepted relay key)");
   }
-  if (!config.supplierEncryptionKey) {
-    throw new Error("SECRET_ENCRYPTION_KEY is required to encrypt supplier identity for Sabai ingest");
+  if (!config.contactEncryptionKey) {
+    throw new Error("SECRET_ENCRYPTION_KEY is required to encrypt contact identity for Sabai ingest");
   }
   if (!config.aiApiKey) {
-    console.warn("OPENAI_API_KEY is not set; supplier detection will fall back to heuristic matching only.");
+    console.warn("OPENAI_API_KEY is not set; contact detection will fall back to heuristic matching only.");
   }
 }

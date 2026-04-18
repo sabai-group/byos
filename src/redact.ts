@@ -1,7 +1,12 @@
 /**
- * Scrubs supplier-identifying strings from message bodies (subject/text/html) before relay so Sabai
- * ingest does not see those names in content. The relay sends the Sabai-side supplier ID (numeric)
- * rather than any form of the supplier name. Relay auth uses SABAI_API_KEY over HTTPS.
+ * Scrubs supplier/buyer-identifying strings from message bodies (subject/text/html) before relay
+ * so Sabai ingest does not see those names in content. The relay sends the Sabai-side contact ID
+ * (numeric) rather than any form of the contact name. Relay auth uses SABAI_API_KEY over HTTPS.
+ *
+ * Kind-aware: the same pipeline is used for both "supplier" (offer lists from sellers) and
+ * "buyer" (request lists from customers). The AI system prompt and the redaction label differ
+ * per kind; on a miss we always return a `RedactionMiss` sentinel so callers can bounce
+ * uniformly (send a warning back to the sender) instead of crashing the inbound handler.
  */
 import { execFile } from "child_process";
 import path from "path";
@@ -10,10 +15,11 @@ import OpenAI from "openai";
 
 import { config } from "./config";
 import type { RelayedAttachment } from "./relay";
-import type { SupplierRecord, SupplierRoster } from "./suppliers";
+import type { ContactKind, ContactRecord, ContactRoster } from "./roster";
 
-export interface SupplierMatch {
-  supplierId: string;
+export interface ContactMatch {
+  kind: ContactKind;
+  contactId: string;
   canonicalName: string;
   matchedAlias?: string;
   confidence?: number;
@@ -21,7 +27,8 @@ export interface SupplierMatch {
 }
 
 export interface RedactedEmail {
-  supplierMatch: SupplierMatch;
+  matched: true;
+  contactMatch: ContactMatch;
   redactedFrom: string;
   redactedSubject: string;
   redactedText: string;
@@ -29,11 +36,22 @@ export interface RedactedEmail {
 }
 
 export interface RedactedWhatsApp {
-  supplierMatch: SupplierMatch;
+  matched: true;
+  contactMatch: ContactMatch;
   redactedFrom: string;
   redactedText: string;
   redactedMessages: Array<Record<string, unknown>>;
 }
+
+/** Sentinel returned when we can't match a buyer/supplier so the caller can bounce
+ *  (warn the sender) instead of crashing the inbound handler. */
+export interface RedactionMiss {
+  matched: false;
+  reason: string;
+}
+
+export type EmailRedactionOutcome = RedactedEmail | RedactionMiss;
+export type WhatsAppRedactionOutcome = RedactedWhatsApp | RedactionMiss;
 
 interface RedactionRule {
   needle: string;
@@ -55,12 +73,16 @@ const client = config.aiApiKey
     })
   : null;
 
+function redactionLabel(kind: ContactKind): string {
+  return kind === "buyer" ? "[REDACTED BUYER]" : "[REDACTED SUPPLIER]";
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function normalizeTerms(supplier: SupplierRecord): string[] {
-  return Array.from(new Set([supplier.canonicalName, ...supplier.aliases].map((value) => value.trim()).filter(Boolean))).sort(
+function normalizeTerms(contact: ContactRecord): string[] {
+  return Array.from(new Set([contact.canonicalName, ...contact.aliases].map((value) => value.trim()).filter(Boolean))).sort(
     (left, right) => right.length - left.length,
   );
 }
@@ -90,30 +112,31 @@ function redactText(input: string | undefined, redactions: RedactionRule[]): str
   return output;
 }
 
-function findHeuristicSupplier(roster: SupplierRoster, haystacks: string[]): SupplierRecord | null {
+function findHeuristicContact(roster: ContactRoster, haystacks: string[]): ContactRecord | null {
   const combined = haystacks.join("\n").toLowerCase();
-  let bestMatch: { supplier: SupplierRecord; alias: string } | null = null;
-  for (const supplier of roster.suppliers) {
-    for (const alias of normalizeTerms(supplier)) {
+  let bestMatch: { contact: ContactRecord; alias: string } | null = null;
+  for (const contact of roster.contacts) {
+    for (const alias of normalizeTerms(contact)) {
       if (alias && combined.includes(alias.toLowerCase())) {
         if (!bestMatch || alias.length > bestMatch.alias.length) {
-          bestMatch = { supplier, alias };
+          bestMatch = { contact, alias };
         }
       }
     }
   }
-  return bestMatch?.supplier ?? null;
+  return bestMatch?.contact ?? null;
 }
 
-function getSupplierByName(roster: SupplierRoster, canonicalName?: string): SupplierRecord | null {
+function getContactByName(roster: ContactRoster, canonicalName?: string): ContactRecord | null {
   if (!canonicalName) return null;
   return (
-    roster.suppliers.find((supplier) => supplier.canonicalName.toLowerCase() === canonicalName.trim().toLowerCase()) ?? null
+    roster.contacts.find((contact) => contact.canonicalName.toLowerCase() === canonicalName.trim().toLowerCase()) ?? null
   );
 }
 
-function buildHeuristicRedactions(inputs: string[], supplier: SupplierRecord): RedactionRule[] {
-  const safeTerms = normalizeTerms(supplier).filter((term) => term.length >= 4 || /\s/.test(term));
+function buildHeuristicRedactions(inputs: string[], contact: ContactRecord, kind: ContactKind): RedactionRule[] {
+  const label = redactionLabel(kind);
+  const safeTerms = normalizeTerms(contact).filter((term) => term.length >= 4 || /\s/.test(term));
   const redactions: RedactionRule[] = [];
   for (const input of inputs) {
     for (const term of safeTerms) {
@@ -121,7 +144,7 @@ function buildHeuristicRedactions(inputs: string[], supplier: SupplierRecord): R
         if (!match[0]) continue;
         redactions.push({
           needle: match[0],
-          replacement: "[REDACTED SUPPLIER]",
+          replacement: label,
         });
       }
     }
@@ -177,18 +200,49 @@ function parseAiRedactionResult(raw: string): AiRedactionResult | null {
   }
 }
 
+function aiSystemPrompt(kind: ContactKind): string {
+  const label = redactionLabel(kind);
+  if (kind === "buyer") {
+    // Mirrors the intuition of backend deduce_requester_name: the buyer is NOT
+    // the sender (the sender is usually an internal employee relaying a
+    // customer request), so look for explicit customer/client mentions.
+    return (
+      "You identify which buyer (the customer/client the message is about) sent or is referenced in a "
+      + "message and produce exact literal redaction rules. The BUYER IS NOT THE SENDER — the sender is "
+      + "usually an internal employee relaying a customer's request. Look for phrases like "
+      + "'requester: ...', 'client: ...', 'customer is ...', 'for <name>', or other explicit mentions. "
+      + "canonicalName must exactly match one buyer from the roster or be null when the buyer is "
+      + "ambiguous or unknown — do NOT guess. Each redaction must be a literal case-sensitive substring "
+      + "copied verbatim from the provided input. Never use regex syntax. If the buyer name is short or "
+      + "ambiguous, expand the needle with nearby words so it uniquely targets the buyer mention. Each "
+      + `replacement must preserve the surrounding text and replace only the buyer-identifying portion with ${label}. `
+      + "Use an empty redactions array when no redaction is needed."
+    );
+  }
+  return (
+    "You identify which supplier sent a message and produce exact literal redaction rules. "
+    + "canonicalName must exactly match one supplier from the roster or be null. Each redaction must be a "
+    + "literal case-sensitive substring copied verbatim from the provided input. Never use regex syntax. "
+    + "If the supplier name is short or ambiguous, expand the needle with nearby words so it uniquely "
+    + "targets the supplier mention. Each replacement must preserve the surrounding text and replace only "
+    + `the supplier-identifying portion with ${label}. Use an empty redactions array when no redaction is needed.`
+  );
+}
+
 async function runAiRedaction(
-  roster: SupplierRoster,
+  roster: ContactRoster,
   fields: { from: string; subject?: string; text?: string; channel: "email" | "whatsapp" },
 ): Promise<AiRedactionResult | null> {
-  if (!client || roster.suppliers.length === 0) {
+  if (!client || roster.contacts.length === 0) {
     return null;
   }
 
-  const rosterSummary = roster.suppliers.map((supplier) => ({
-    canonicalName: supplier.canonicalName,
-    aliases: supplier.aliases,
+  const rosterSummary = roster.contacts.map((contact) => ({
+    canonicalName: contact.canonicalName,
+    aliases: contact.aliases,
   }));
+
+  const schemaName = roster.kind === "buyer" ? "buyer_redaction" : "supplier_redaction";
 
   const response = await client.chat.completions.create({
     model: config.aiModel,
@@ -196,7 +250,7 @@ async function runAiRedaction(
     response_format: {
       type: "json_schema",
       json_schema: {
-        name: "supplier_redaction",
+        name: schemaName,
         strict: true,
         schema: {
           type: "object",
@@ -226,13 +280,13 @@ async function runAiRedaction(
     messages: [
       {
         role: "system",
-        content:
-          "You identify which supplier sent a message and produce exact literal redaction rules. canonicalName must exactly match one supplier from the roster or be null. Each redaction must be a literal case-sensitive substring copied verbatim from the provided input. Never use regex syntax. If the supplier name is short or ambiguous, expand the needle with nearby words so it uniquely targets the supplier mention. Each replacement must preserve the surrounding text and replace only the supplier-identifying portion with [REDACTED SUPPLIER]. Use an empty redactions array when no redaction is needed.",
+        content: aiSystemPrompt(roster.kind),
       },
       {
         role: "user",
         content: JSON.stringify({
           channel: fields.channel,
+          kind: roster.kind,
           from: fields.from,
           subject: fields.subject ?? "",
           text: fields.text ?? "",
@@ -247,51 +301,69 @@ async function runAiRedaction(
   return parseAiRedactionResult(raw);
 }
 
-async function matchSupplier(
-  roster: SupplierRoster,
+type MatchResult =
+  | { matched: true; contact: ContactRecord; aiResult: AiRedactionResult | null }
+  | { matched: false; reason: string };
+
+async function matchContact(
+  roster: ContactRoster,
   fields: { from: string; subject?: string; text?: string; channel: "email" | "whatsapp" },
-): Promise<{ supplier: SupplierRecord; aiResult: AiRedactionResult | null }> {
+): Promise<MatchResult> {
   const aiResult = await runAiRedaction(roster, fields).catch((error) => {
-    console.warn("AI redaction failed, falling back to heuristic matching.", error);
+    console.warn(`AI ${roster.kind} redaction failed, falling back to heuristic matching.`, error);
     return null;
   });
-  console.log("aiResult", aiResult);
-  const aiSupplier = getSupplierByName(roster, aiResult?.canonicalName);
-  if (aiSupplier) {
-    return { supplier: aiSupplier, aiResult };
+  console.log(`aiResult (${roster.kind})`, aiResult);
+  const aiContact = getContactByName(roster, aiResult?.canonicalName);
+  if (aiContact) {
+    return { matched: true, contact: aiContact, aiResult };
   }
 
-  const heuristicSupplier = findHeuristicSupplier(roster, [fields.from, fields.subject ?? "", fields.text ?? ""]);
-  if (!heuristicSupplier) {
-    throw new Error("Unable to determine supplier from inbound message.");
+  const heuristicContact = findHeuristicContact(roster, [fields.from, fields.subject ?? "", fields.text ?? ""]);
+  if (heuristicContact) {
+    return { matched: true, contact: heuristicContact, aiResult };
   }
-  return { supplier: heuristicSupplier, aiResult };
+
+  return { matched: false, reason: `Unable to determine ${roster.kind} from inbound message.` };
 }
 
 export async function detectAndRedactEmail(
-  roster: SupplierRoster,
+  roster: ContactRoster,
   email: { from: string; subject?: string; text?: string; html?: string },
-): Promise<RedactedEmail> {
-  const { supplier, aiResult } = await matchSupplier(roster, {
+): Promise<EmailRedactionOutcome> {
+  const result = await matchContact(roster, {
     channel: "email",
     from: email.from,
     subject: email.subject,
     text: email.text,
   });
+  if (!result.matched) {
+    return { matched: false, reason: result.reason };
+  }
+  const { contact, aiResult } = result;
   const redactions = dedupeRedactions([
     ...(aiResult?.redactions ?? []),
-    ...buildHeuristicRedactions([email.from, email.subject ?? "", email.text ?? "", email.html ?? ""], supplier),
+    ...buildHeuristicRedactions(
+      [email.from, email.subject ?? "", email.text ?? "", email.html ?? ""],
+      contact,
+      roster.kind,
+    ),
   ]);
 
   return {
-    supplierMatch: {
-      supplierId: supplier.id,
-      canonicalName: supplier.canonicalName,
+    matched: true,
+    contactMatch: {
+      kind: roster.kind,
+      contactId: contact.id,
+      canonicalName: contact.canonicalName,
       matchedAlias: aiResult?.matchedAlias,
       confidence: aiResult?.confidence,
       reasoning: aiResult?.reasoning,
     },
-    redactedFrom: "Supplier Redacted <redacted@byos.invalid>",
+    redactedFrom:
+      roster.kind === "buyer"
+        ? "Buyer Redacted <redacted@byos.invalid>"
+        : "Supplier Redacted <redacted@byos.invalid>",
     redactedSubject: redactText(email.subject, redactions),
     redactedText: redactText(email.text, redactions),
     redactedHtml: redactText(email.html, redactions),
@@ -299,34 +371,41 @@ export async function detectAndRedactEmail(
 }
 
 export async function detectAndRedactWhatsApp(
-  roster: SupplierRoster,
+  roster: ContactRoster,
   payload: { from: string; text?: string; messages: Array<Record<string, unknown>> },
-): Promise<RedactedWhatsApp> {
-  const { supplier, aiResult } = await matchSupplier(roster, {
+): Promise<WhatsAppRedactionOutcome> {
+  const result = await matchContact(roster, {
     channel: "whatsapp",
     from: payload.from,
     text: payload.text,
   });
+  if (!result.matched) {
+    return { matched: false, reason: result.reason };
+  }
+  const { contact, aiResult } = result;
   const redactions = dedupeRedactions([
     ...(aiResult?.redactions ?? []),
     ...buildHeuristicRedactions(
       [payload.from, payload.text ?? "", ...payload.messages.map((message) => (typeof message.text === "string" ? message.text : ""))],
-      supplier,
+      contact,
+      roster.kind,
     ),
   ]);
   const redactedText = redactText(payload.text, redactions);
   const redactedMessages = payload.messages.map((message) => ({
     ...message,
-    // from: "whatsapp:byos-redacted", // the original from is probably not the supplier, just an employee of the client
+    // from: "whatsapp:byos-redacted", // the original from is probably not the contact, just an employee of the client
     text: typeof message.text === "string" ? redactText(message.text, redactions) : message.text,
   }));
   console.log("redactedText", redactedText);
   console.log("redactedMessages", redactedMessages);
 
   return {
-    supplierMatch: {
-      supplierId: supplier.id,
-      canonicalName: supplier.canonicalName,
+    matched: true,
+    contactMatch: {
+      kind: roster.kind,
+      contactId: contact.id,
+      canonicalName: contact.canonicalName,
       matchedAlias: aiResult?.matchedAlias,
       confidence: aiResult?.confidence,
       reasoning: aiResult?.reasoning,
@@ -348,9 +427,9 @@ function isExcelAttachment(attachment: RelayedAttachment): boolean {
   return EXCEL_CONTENT_TYPES.has(attachment.contentType);
 }
 
-function redactExcelAttachment(xlsxBytes: Buffer, roster: SupplierRoster): Promise<Buffer> {
+function redactExcelAttachment(xlsxBytes: Buffer, roster: ContactRoster): Promise<Buffer> {
   const rosterJson = JSON.stringify(
-    roster.suppliers.map((s) => ({ canonicalName: s.canonicalName, aliases: s.aliases })),
+    roster.contacts.map((s) => ({ canonicalName: s.canonicalName, aliases: s.aliases })),
   );
   return new Promise((resolve, reject) => {
     const proc = execFile(
@@ -359,7 +438,12 @@ function redactExcelAttachment(xlsxBytes: Buffer, roster: SupplierRoster): Promi
       {
         maxBuffer: 100 * 1024 * 1024,
         encoding: "buffer" as any,
-        env: { ...process.env, SUPPLIER_ROSTER: rosterJson },
+        env: {
+          ...process.env,
+          CONTACT_ROSTER: rosterJson,
+          CONTACT_KIND: roster.kind,
+          REDACTION_LABEL: redactionLabel(roster.kind),
+        },
       },
       (error, stdout, stderr) => {
         if (stderr && (stderr as unknown as Buffer).length > 0) {
@@ -377,10 +461,13 @@ function redactExcelAttachment(xlsxBytes: Buffer, roster: SupplierRoster): Promi
 }
 
 /**
- * Process all attachments: strip embedded images and redact supplier-identifying
+ * Process all attachments: strip embedded images and redact contact-identifying
  * content from Excel files. Non-Excel attachments pass through unchanged.
  */
-export async function redactAttachments(attachments: RelayedAttachment[], roster: SupplierRoster): Promise<RelayedAttachment[]> {
+export async function redactAttachments(
+  attachments: RelayedAttachment[],
+  roster: ContactRoster,
+): Promise<RelayedAttachment[]> {
   return Promise.all(
     attachments.map(async (attachment) => {
       if (!isExcelAttachment(attachment)) {

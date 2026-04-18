@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
-Redact Excel (.xlsx): strips embedded images/charts and supplier-identifying cell
-content via the OpenAI API (first 20 rows per sheet sampled for AI context).
+Redact Excel (.xlsx): strips embedded images/charts and contact-identifying cell
+content (supplier OR buyer, depending on CONTACT_KIND) via the OpenAI API (first
+20 rows per sheet sampled for AI context).
 
 Usage: reads raw xlsx bytes from stdin, writes cleaned xlsx bytes to stdout.
   - OPENAI_API_KEY, OPENAI_BASE_URL, BYOS_AI_MODEL: AI config (from env)
-  - SUPPLIER_ROSTER: JSON array of {canonicalName, aliases} (from env, set by TS caller)
+  - CONTACT_ROSTER: JSON array of {canonicalName, aliases} (from env, set by TS caller)
+  - CONTACT_KIND: "supplier" or "buyer".
+  - REDACTION_LABEL: string to substitute for identifying mentions; defaults
+    to "[REDACTED SUPPLIER]" or "[REDACTED BUYER]" based on CONTACT_KIND.
 
 Exit code 0 on success, non-zero on failure (stderr has the error message).
 """
@@ -29,14 +33,26 @@ def get_openai_client():
     return OpenAI(api_key=api_key, base_url=base_url)
 
 
-def get_supplier_roster() -> list[dict]:
-    raw = os.environ.get("SUPPLIER_ROSTER", "")
+def get_contact_kind() -> str:
+    kind = (os.environ.get("CONTACT_KIND") or "supplier").strip().lower()
+    return "buyer" if kind == "buyer" else "supplier"
+
+
+def get_redaction_label() -> str:
+    explicit = os.environ.get("REDACTION_LABEL")
+    if explicit:
+        return explicit
+    return "[REDACTED BUYER]" if get_contact_kind() == "buyer" else "[REDACTED SUPPLIER]"
+
+
+def get_contact_roster() -> list[dict]:
+    raw = os.environ.get("CONTACT_ROSTER", "")
     if not raw:
         return []
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
-        print("Warning: failed to parse SUPPLIER_ROSTER", file=sys.stderr)
+        print("Warning: failed to parse CONTACT_ROSTER", file=sys.stderr)
         return []
 
 
@@ -50,9 +66,16 @@ def sample_sheet_content(ws, max_rows: int = SAMPLE_ROWS) -> str:
     return "\n".join(lines)
 
 
-def ask_ai_for_redactions(client, model: str, roster: list[dict], sheet_samples: dict[str, str]) -> list[dict]:
+def ask_ai_for_redactions(
+    client,
+    model: str,
+    roster: list[dict],
+    sheet_samples: dict[str, str],
+    kind: str,
+    label: str,
+) -> list[dict]:
     """
-    Send sampled sheet content + supplier roster to the AI.
+    Send sampled sheet content + contact roster to the AI.
     Returns a list of {needle, replacement} redaction rules.
     """
     roster_summary = json.dumps(
@@ -67,28 +90,43 @@ def ask_ai_for_redactions(client, model: str, roster: list[dict], sheet_samples:
     if not sheets_text.strip():
         return []
 
+    if kind == "buyer":
+        system_prompt = (
+            f"You redact BUYER-identifying information from spreadsheet content. "
+            f"The buyer is the customer/client the request is for, NOT the sender (the sender is "
+            f"typically an internal employee relaying a request). You receive a buyer roster and "
+            f"sampled rows from Excel sheets. Return a JSON object with a single key \"redactions\": "
+            f"an array of {{\"needle\": \"<exact case-sensitive substring from the input>\", "
+            f"\"replacement\": \"{label}\"}} objects. Each needle must be a literal substring copied "
+            f"verbatim from the sheet content. Redact: buyer/customer/company names, contact persons, "
+            f"phone numbers, email addresses, physical addresses, website URLs, and any other "
+            f"identifying information that reveals who the buyer is. Do NOT redact product names, "
+            f"SKUs, quantities, prices, units, or other trade-relevant data. Return an empty "
+            f"redactions array if nothing needs redacting."
+        )
+    else:
+        system_prompt = (
+            f"You redact supplier-identifying information from spreadsheet content. "
+            f"You receive a supplier roster and sampled rows from Excel sheets. "
+            f"Return a JSON object with a single key \"redactions\": an array of "
+            f"{{\"needle\": \"<exact case-sensitive substring from the input>\", "
+            f"\"replacement\": \"{label}\"}} objects. Each needle must be a literal substring copied "
+            f"verbatim from the sheet content. Redact: supplier/company names, contact persons, phone "
+            f"numbers, email addresses, physical addresses, website URLs, and any other identifying "
+            f"information that reveals who the supplier is. Do NOT redact product names, SKUs, "
+            f"quantities, prices, units, or other trade-relevant data. Return an empty redactions "
+            f"array if nothing needs redacting."
+        )
+
     response = client.chat.completions.create(
         model=model,
         response_format={"type": "json_object"},
         messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You redact supplier-identifying information from spreadsheet content. "
-                    "You receive a supplier roster and sampled rows from Excel sheets. "
-                    "Return a JSON object with a single key \"redactions\": an array of "
-                    "{\"needle\": \"<exact case-sensitive substring from the input>\", \"replacement\": \"[REDACTED]\"} "
-                    "objects. Each needle must be a literal substring copied verbatim from the sheet content. "
-                    "Redact: supplier/company names, contact persons, phone numbers, email addresses, "
-                    "physical addresses, website URLs, and any other identifying information that reveals "
-                    "who the supplier is. Do NOT redact product names, SKUs, quantities, prices, units, "
-                    "or other trade-relevant data. Return an empty redactions array if nothing needs redacting."
-                ),
-            },
+            {"role": "system", "content": system_prompt},
             {
                 "role": "user",
                 "content": json.dumps(
-                    {"roster": roster_summary, "sheets": sheets_text},
+                    {"kind": kind, "roster": roster_summary, "sheets": sheets_text},
                     ensure_ascii=False,
                 ),
             },
@@ -145,7 +183,9 @@ def strip_and_redact(data: bytes) -> bytes:
     client = get_openai_client()
     if client:
         model = os.environ.get("BYOS_AI_MODEL", "gpt-4.1-mini")
-        roster = get_supplier_roster()
+        kind = get_contact_kind()
+        label = get_redaction_label()
+        roster = get_contact_roster()
         sheet_samples = {}
         for ws in wb.worksheets:
             content = sample_sheet_content(ws)
@@ -153,10 +193,16 @@ def strip_and_redact(data: bytes) -> bytes:
                 sheet_samples[ws.title] = content
         if sheet_samples:
             try:
-                redactions = ask_ai_for_redactions(client, model, roster, sheet_samples)
+                redactions = ask_ai_for_redactions(
+                    client, model, roster, sheet_samples, kind, label
+                )
                 changed = apply_redactions(wb, redactions)
                 if changed:
-                    print(f"Redacted {changed} cell(s) across {len(wb.worksheets)} sheet(s)", file=sys.stderr)
+                    print(
+                        f"Redacted {changed} {kind} cell(s) across "
+                        f"{len(wb.worksheets)} sheet(s)",
+                        file=sys.stderr,
+                    )
             except Exception as exc:
                 print(f"Warning: AI redaction failed, images still stripped: {exc}", file=sys.stderr)
     else:

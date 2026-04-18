@@ -6,54 +6,196 @@ import QRCode from "qrcode";
 import { Client, LocalAuth, type Message } from "whatsapp-web.js";
 
 import { config } from "./config";
+import { openLidCache, type LidCache } from "./lidCache";
 import type { RelayedAttachment } from "./relay";
 
 const execFileAsync = promisify(execFile);
 
 /**
  * When `true`, inbound senders using Linked IDs (`*@lid`) are mapped to phone JIDs (`*@c.us`)
- * where WhatsApp Web exposes the mapping. When `false`, wire IDs are kept as-is.
+ * via the 4-tier {@link resolveLidToPhoneJid} resolver. When `false`, wire IDs are kept as-is.
  *
- * Re-enable: set to `true` (or swap which line is commented below).
+ * Kept as a kill-switch; swap the commented line below to force-disable.
  */
-// const RESOLVE_WHATSAPP_LID_TO_PHONE_JID = true;
-const RESOLVE_WHATSAPP_LID_TO_PHONE_JID = false;
+const RESOLVE_WHATSAPP_LID_TO_PHONE_JID = true;
+// const RESOLVE_WHATSAPP_LID_TO_PHONE_JID = false;
 
-async function resolveLidToPhoneJid(client: Client, jid: string): Promise<string> {
-  if (!jid.endsWith("@lid")) {
-    return jid;
-  }
-  try {
-    const rows = await client.getContactLidAndPhone([jid]);
-    const pn = rows[0]?.pn;
-    if (pn && typeof pn === "string") {
-      return pn;
-    }
-  } catch (error) {
-    console.warn("[byos:whatsapp] Failed to resolve @lid to phone JID", jid, error);
-  }
-  return jid;
+/** Entries older than this are re-resolved (but the stale entry is kept as a fallback if all tiers miss? no — plan says discard and mark unresolved). */
+export const LID_CACHE_STALE_MS = 30 * 24 * 60 * 60 * 1000;
+
+export type LidResolutionSource =
+  | "passthrough"
+  | "tierA"
+  | "tierB"
+  | "tierC"
+  | "tierD"
+  | "unresolved";
+
+export interface LidResolution {
+  phoneJid: string;
+  unresolved: boolean;
+  source: LidResolutionSource;
 }
 
-type InboundWhatsAppSenderResolution = {
+function logLid(event: string, details: Record<string, unknown>): void {
+  console.log(`[byos:whatsapp:lid] ${event}`, JSON.stringify(details));
+}
+
+function warnLid(event: string, details: Record<string, unknown>): void {
+  console.warn(`[byos:whatsapp:lid] ${event}`, JSON.stringify(details));
+}
+
+/**
+ * 4-tier `@lid` -> `@c.us` resolver. First tier that yields a phone JID wins.
+ *
+ * Tiers:
+ *   A — disk cache (skipped if the entry is older than {@link LID_CACHE_STALE_MS}).
+ *   B — `client.getContactLidAndPhone([jid])` (always array to dodge the ≤20 batch bug).
+ *   C — `client.getContactById(jid)` (whatsapp-web.js does its own LID->phone swap in WWebJS.getContact).
+ *   D — raw `pupPage.evaluate(Store.LidUtils.getPhoneNumber)` — workaround from issue #3519.
+ *
+ * All four miss → the LID is returned unchanged with `unresolved: true` so callers
+ * can tell apart a real PN waid from an LID integer when populating batch metadata.
+ */
+export async function resolveLidToPhoneJid(
+  client: Client,
+  lidCache: LidCache,
+  jid: string,
+): Promise<LidResolution> {
+  if (!jid.endsWith("@lid")) {
+    return { phoneJid: jid, unresolved: false, source: "passthrough" };
+  }
+
+  const previousEntry = lidCache.getEntry(jid);
+
+  const cached = lidCache.get(jid);
+  if (cached) {
+    const stale = lidCache.refreshIfStale(jid, LID_CACHE_STALE_MS);
+    if (!stale) {
+      logLid("tierA_hit", { lid: jid, phoneJid: cached });
+      return { phoneJid: cached, unresolved: false, source: "tierA" };
+    }
+    logLid("tierA_stale", { lid: jid, phoneJid: cached });
+  } else {
+    logLid("tierA_miss", { lid: jid });
+  }
+
+  const recordResolve = (phoneJid: string, source: "tierB" | "tierC" | "tierD"): LidResolution => {
+    if (previousEntry && previousEntry.phoneJid !== phoneJid) {
+      warnLid("lid_remapped", {
+        lid: jid,
+        previous: previousEntry.phoneJid,
+        next: phoneJid,
+        previousSource: previousEntry.source,
+        newSource: source,
+      });
+    }
+    lidCache.set(jid, phoneJid, source);
+    logLid("resolved", { source, lid: jid, phoneJid });
+    return { phoneJid, unresolved: false, source };
+  };
+
+  try {
+    const rows = await client.getContactLidAndPhone([jid]);
+    const pn = rows?.[0]?.pn;
+    if (typeof pn === "string" && pn.endsWith("@c.us")) {
+      return recordResolve(pn, "tierB");
+    }
+    logLid("tierB_miss", { lid: jid, rows });
+  } catch (error) {
+    warnLid("tierB_error", {
+      lid: jid,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  try {
+    const contact = (await client.getContactById(jid)) as unknown as {
+      id?: { _serialized?: string };
+      number?: string;
+    } | null;
+    const serialized = contact?.id?._serialized;
+    if (typeof serialized === "string" && serialized.endsWith("@c.us")) {
+      return recordResolve(serialized, "tierC");
+    }
+    const number = contact?.number;
+    if (typeof number === "string" && /^\d{7,15}$/.test(number)) {
+      return recordResolve(`${number}@c.us`, "tierC");
+    }
+    logLid("tierC_miss", { lid: jid, serialized, number });
+  } catch (error) {
+    warnLid("tierC_error", {
+      lid: jid,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  try {
+    const pupPage = (client as unknown as { pupPage?: { evaluate: (fn: unknown, ...args: unknown[]) => Promise<unknown> } }).pupPage;
+    if (pupPage && typeof pupPage.evaluate === "function") {
+      const phoneSerialized = (await pupPage.evaluate(
+        (lidJid: string) => {
+          const store = (globalThis as unknown as { Store?: { WidFactory: { createWid: (j: string) => unknown }; LidUtils: { getPhoneNumber: (w: unknown) => { _serialized?: string } | null } } }).Store;
+          if (!store) return null;
+          try {
+            const wid = store.WidFactory.createWid(lidJid);
+            const phone = store.LidUtils.getPhoneNumber(wid);
+            return phone?._serialized ?? null;
+          } catch (err) {
+            return null;
+          }
+        },
+        jid,
+      )) as string | null;
+      if (typeof phoneSerialized === "string" && phoneSerialized.endsWith("@c.us")) {
+        return recordResolve(phoneSerialized, "tierD");
+      }
+      logLid("tierD_miss", { lid: jid, phoneSerialized });
+    } else {
+      logLid("tierD_skipped_no_pup_page", { lid: jid });
+    }
+  } catch (error) {
+    warnLid("tierD_error", {
+      lid: jid,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  warnLid("unresolved", { lid: jid });
+  return { phoneJid: jid, unresolved: true, source: "unresolved" };
+}
+
+export type InboundWhatsAppSenderResolution = {
   senderJid: string;
   batchKey: string;
   batchFrom: string;
   /** Original wire JID when it differed after LID→phone resolution (logging only). */
   fromWire?: string;
+  /** True when the LID resolver could not find a `@c.us` phone JID. */
+  unresolvedSender: boolean;
 };
 
 /**
  * Derives batch key, relay `from`, and per-message sender id from a `message` event.
  * LID→phone resolution is applied only when {@link RESOLVE_WHATSAPP_LID_TO_PHONE_JID} is on.
  */
-async function resolveInboundWhatsAppSender(client: Client, message: Message): Promise<InboundWhatsAppSenderResolution> {
+export async function resolveInboundWhatsAppSender(
+  client: Client,
+  lidCache: LidCache,
+  message: Message,
+): Promise<InboundWhatsAppSenderResolution> {
   const isGroup = message.from.endsWith("@g.us");
   const senderWire = isGroup ? (message.author || message.from) : message.from;
 
+  const selfWid = (client as unknown as { info?: { wid?: { _serialized?: string } } }).info?.wid?._serialized;
+  const isSelfSend = message.fromMe === true || (selfWid !== undefined && message.author === selfWid);
+
   let senderJid = senderWire;
-  if (RESOLVE_WHATSAPP_LID_TO_PHONE_JID) {
-    senderJid = await resolveLidToPhoneJid(client, senderWire);
+  let unresolvedSender = false;
+  if (RESOLVE_WHATSAPP_LID_TO_PHONE_JID && !isSelfSend) {
+    const resolution = await resolveLidToPhoneJid(client, lidCache, senderWire);
+    senderJid = resolution.phoneJid;
+    unresolvedSender = resolution.unresolved;
   }
 
   const batchKey = isGroup ? message.from : senderJid;
@@ -61,7 +203,7 @@ async function resolveInboundWhatsAppSender(client: Client, message: Message): P
   const fromWire =
     RESOLVE_WHATSAPP_LID_TO_PHONE_JID && senderWire !== senderJid ? senderWire : undefined;
 
-  return { senderJid, batchKey, batchFrom, fromWire };
+  return { senderJid, batchKey, batchFrom, fromWire, unresolvedSender };
 }
 
 interface WhatsAppBatch {
@@ -70,12 +212,27 @@ interface WhatsAppBatch {
   messages: Array<Record<string, unknown>>;
   attachments: RelayedAttachment[];
   timer?: NodeJS.Timeout;
+  /** Set when ANY message in the batch had an unresolved LID sender. */
+  unresolvedSender: boolean;
 }
 
 export interface WhatsAppService {
   forceQrForWeb: () => Promise<WhatsAppLinkState>;
   getLinkState: () => WhatsAppLinkState;
   shutdown: () => Promise<void>;
+  /**
+   * Send a short warning text back to `senderJid` over the WhatsApp client.
+   * Used when BYOS cannot match a buyer/supplier on an inbound batch and the
+   * sender needs to be told to register the contact in the BYOS portal.
+   *
+   * The JID is used as-is: for `@lid` senders this still delivers correctly
+   * because replies flow through the same channel that produced the LID, so
+   * no phone-number resolution is required.
+   *
+   * Resolves silently if the WhatsApp client is not currently ready; callers
+   * should treat this as best-effort.
+   */
+  sendSenderWarning: (senderJid: string, text: string) => Promise<void>;
 }
 
 export interface WhatsAppLinkState {
@@ -107,6 +264,10 @@ export async function startWhatsAppService(options: {
   const batches = new Map<string, WhatsAppBatch>();
   const pendingQrWaiters = new Set<(state: WhatsAppLinkState) => void>();
   const pendingStartupStateChecks = new Set<() => void>();
+
+  // Survives `forceQrForWeb` session wipes: only `.wwebjs_auth/` is cleared by wipeWhatsAppAuthRoot,
+  // while the cache sits inside `whatsappArtifactsDir` and persists across re-links.
+  const lidCache = openLidCache(config.whatsappArtifactsDir);
 
   let client: Client | null = null;
   let latestQrDataUrl: string | null = null;
@@ -170,6 +331,10 @@ export async function startWhatsAppService(options: {
 
   /**
    * Wipe persisted Chromium / LocalAuth data. Only clears *contents* of the auth root (volume mount safe).
+   *
+   * NOTE: This only touches `config.whatsappAuthPath` (`.wwebjs_auth` tree). It MUST NOT touch
+   * `config.whatsappArtifactsDir` — that directory contains `lid-cache.json`, which is meant
+   * to survive force-QR / re-link so we don't have to re-resolve every LID from scratch.
    */
   async function wipeWhatsAppAuthRoot(rootPath: string): Promise<{ ok: boolean; error?: string }> {
     let lastError: string | undefined;
@@ -344,6 +509,7 @@ export async function startWhatsAppService(options: {
       attachments: batch.attachments,
       metadata: {
         waid: batch.from.replace(/\D/g, "") || "redacted",
+        unresolvedSender: batch.unresolvedSender,
       },
     });
   }
@@ -447,7 +613,8 @@ export async function startWhatsAppService(options: {
         return;
       }
 
-      const { senderJid, batchKey, batchFrom, fromWire } = await resolveInboundWhatsAppSender(activeClient, message);
+      const { senderJid, batchKey, batchFrom, fromWire, unresolvedSender } =
+        await resolveInboundWhatsAppSender(activeClient, lidCache, message);
 
       const inboundTimestamp = new Date((message.timestamp ?? Math.floor(Date.now() / 1000)) * 1000).toISOString();
       console.log(
@@ -507,6 +674,7 @@ export async function startWhatsAppService(options: {
           },
         ],
         attachments,
+        unresolvedSender: (existing?.unresolvedSender ?? false) || unresolvedSender,
       };
 
       batch.timer = setTimeout(() => {
@@ -754,6 +922,22 @@ export async function startWhatsAppService(options: {
       return waitForQrState();
     },
     getLinkState,
+    async sendSenderWarning(senderJid: string, text: string) {
+      if (!client || !isReady) {
+        console.warn(
+          `[byos:whatsapp] sendSenderWarning skipped: client not ready (jid=${senderJid})`,
+        );
+        return;
+      }
+      try {
+        await client.sendMessage(senderJid, text);
+      } catch (error) {
+        console.warn(
+          `[byos:whatsapp] sendSenderWarning failed (jid=${senderJid}):`,
+          error,
+        );
+      }
+    },
     async shutdown() {
       for (const batch of batches.values()) {
         if (batch.timer) {

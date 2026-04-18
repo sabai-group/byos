@@ -2,11 +2,20 @@ import type { Server as HttpServer } from "http";
 
 import { validateConfig, config } from "./config";
 import { detectAndRedactEmail, detectAndRedactWhatsApp, redactAttachments } from "./redact";
+import { notifySenderBounceEmail } from "./notify";
 import { relayEmail, relayWhatsApp } from "./relay";
+import { fetchRoster } from "./roster";
 import { startSmtpServer } from "./smtp";
-import { fetchRosterFromSabai } from "./suppliers";
 import { createWebApp } from "./web";
 import { startWhatsAppService } from "./whatsapp";
+
+function extractEmailAddress(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const m = raw.match(/<([^>]+)>/);
+  if (m && m[1]) return m[1].trim();
+  const trimmed = raw.trim();
+  return trimmed.includes("@") ? trimmed : undefined;
+}
 
 async function main() {
   validateConfig();
@@ -14,12 +23,25 @@ async function main() {
 
   const whatsappService = await startWhatsAppService({
     onBatch: async (batch) => {
-      const roster = await fetchRosterFromSabai();
+      const kind = config.whatsappContactKind;
+      const roster = await fetchRoster(kind);
       const redacted = await detectAndRedactWhatsApp(roster, {
         from: batch.from,
         text: batch.text,
         messages: batch.messages,
       });
+      if (!redacted.matched) {
+        // BYOS couldn't identify the contact — warn the sender directly via
+        // the same WhatsApp channel (no LID -> phone resolution needed).
+        console.warn(
+          `[byos:whatsapp] unmatched ${kind} from ${batch.from}: ${redacted.reason}`,
+        );
+        await whatsappService.sendSenderWarning(
+          batch.from,
+          `BYOS couldn't identify the ${kind} on this message. Please add them in the BYOS portal and resend.`,
+        );
+        return;
+      }
       const cleanedAttachments = await redactAttachments(batch.attachments, roster);
       await relayWhatsApp({
         from: redacted.redactedFrom,
@@ -32,7 +54,7 @@ async function main() {
           waid: "redacted",
           byos_received_at: new Date().toISOString(),
         },
-        supplierMatch: redacted.supplierMatch,
+        contactMatch: redacted.contactMatch,
       });
     },
   });
@@ -50,8 +72,26 @@ async function main() {
 
   const smtpServer = await startSmtpServer({
     onEmail: async (email) => {
-      const roster = await fetchRosterFromSabai();
+      const roster = await fetchRoster(email.kind);
       const redacted = await detectAndRedactEmail(roster, email);
+      if (!redacted.matched) {
+        // Couldn't identify the contact — email the original sender a bounce
+        // explanation via Sabai's SendGrid. Applies to both supplier (offers@)
+        // and buyer (requests@) misses.
+        const senderEmail = extractEmailAddress(email.from);
+        console.warn(
+          `[byos:smtp] unmatched ${email.kind} from=${email.from} (to=${email.to}): ${redacted.reason}`,
+        );
+        if (senderEmail) {
+          await notifySenderBounceEmail({
+            senderEmail,
+            kind: email.kind,
+            reason: redacted.reason,
+            originalSubject: email.subject,
+          });
+        }
+        return;
+      }
       const cleanedAttachments = await redactAttachments(email.attachments, roster);
       await relayEmail({
         from: redacted.redactedFrom,
@@ -63,7 +103,7 @@ async function main() {
         metadata: {
           byos_received_at: new Date().toISOString(),
         },
-        supplierMatch: redacted.supplierMatch,
+        contactMatch: redacted.contactMatch,
       });
     },
   });

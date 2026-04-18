@@ -3,8 +3,8 @@ import path from "path";
 
 import { clearSessionCookie, hasValidSession, issueSessionCookie, requireSession, verifyPassword } from "./auth";
 import { config } from "./config";
-import { encryptSupplierName } from "./relay";
-import { fetchRosterFromSabai } from "./suppliers";
+import { encryptContactName } from "./relay";
+import { fetchRoster, type ContactKind } from "./roster";
 import type { WhatsAppLinkState } from "./whatsapp";
 
 function isLikelyQrDataUrl(value: string | null | undefined): boolean {
@@ -26,6 +26,37 @@ function toPublicWhatsAppState(state: WhatsAppLinkState) {
     qrDataUrl: showQr ? state.qrDataUrl : null,
     hasError: Boolean(state.lastError),
   };
+}
+
+function parseContactKind(raw: unknown): ContactKind {
+  return String(raw ?? "supplier").toLowerCase() === "buyer" ? "buyer" : "supplier";
+}
+
+function listKey(kind: ContactKind): "suppliers" | "buyers" {
+  return kind === "buyer" ? "buyers" : "suppliers";
+}
+
+function rosterPath(kind: ContactKind): string {
+  return kind === "buyer" ? "/byos/buyers" : "/byos/suppliers";
+}
+
+async function postContactToSabai(
+  kind: ContactKind,
+  encryptedName: string,
+): Promise<unknown> {
+  const response = await fetch(`${config.sabaiBaseUrl}${rosterPath(kind)}`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-BYOS-API-Key": config.sabaiApiKey,
+    },
+    body: JSON.stringify({ name: encryptedName, is_encrypted: true }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(`Sabai returned ${response.status}: ${text}`);
+  }
+  return response.json();
 }
 
 export function createWebApp(options: {
@@ -60,35 +91,40 @@ export function createWebApp(options: {
     response.json({ ok: true });
   });
 
-  app.get("/api/roster", requireSession, async (_request, response, next) => {
+  /**
+   * Kind-aware roster fetch. `?kind=supplier|buyer` (defaults to supplier).
+   * Returns `{ kind, updatedAt, suppliers | buyers: [...] }`, matching the
+   * Sabai-side GET /byos/{suppliers,buyers} shape.
+   */
+  app.get("/api/roster", requireSession, async (request, response, next) => {
     try {
-      response.json(await fetchRosterFromSabai());
+      const kind = parseContactKind(request.query.kind);
+      const roster = await fetchRoster(kind);
+      response.json({
+        kind,
+        updatedAt: roster.updatedAt,
+        [listKey(kind)]: roster.contacts,
+      });
     } catch (error) {
       next(error);
     }
   });
 
-  app.post("/api/suppliers", requireSession, async (request, response, next) => {
+  /**
+   * Unified contact endpoint; body: `{ kind, name }`. BYOS encrypts the name
+   * locally before shipping to Sabai so plaintext never touches the DB.
+   */
+  app.post("/api/contacts", requireSession, async (request, response, next) => {
     try {
+      const kind = parseContactKind(request.body?.kind);
       const { name } = request.body ?? {};
       if (!name || typeof name !== "string") {
         response.status(400).json({ error: "name is required" });
         return;
       }
-      const encrypted = encryptSupplierName(name.trim());
-      const sabaiResponse = await fetch(`${config.sabaiBaseUrl}/byos/suppliers`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-BYOS-API-Key": config.sabaiApiKey,
-        },
-        body: JSON.stringify({ name: encrypted, is_encrypted: true }),
-      });
-      if (!sabaiResponse.ok) {
-        const text = await sabaiResponse.text();
-        throw new Error(`Sabai returned ${sabaiResponse.status}: ${text}`);
-      }
-      response.json(await sabaiResponse.json());
+      const encrypted = encryptContactName(name.trim());
+      const result = await postContactToSabai(kind, encrypted);
+      response.json(result);
     } catch (error) {
       next(error);
     }

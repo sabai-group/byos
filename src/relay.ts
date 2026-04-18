@@ -1,12 +1,14 @@
 /**
  * Relays redacted traffic to Sabai: SABAI_API_KEY in X-BYOS-API-Key authenticates the client (HTTPS).
- * AES-256-GCM encrypts canonical supplier names stored in Sabai's DB (see config.supplierEncryptionKey).
- * The relay payload sends the Sabai-side supplier ID directly — no encrypted name on the wire.
+ * AES-256-GCM (config.contactEncryptionKey) encrypts canonical contact (supplier/buyer) names
+ * stored in Sabai's DB. The relay payload sends the Sabai-side contact ID directly — no
+ * encrypted name on the wire.
  */
 import crypto from "crypto";
 
 import { config } from "./config";
-import type { SupplierMatch } from "./redact";
+import type { ContactKind } from "./roster";
+import type { ContactMatch } from "./redact";
 
 export interface RelayedAttachment {
   contentBase64: string;
@@ -22,7 +24,7 @@ export interface RelayedEmailPayload {
   html?: string;
   attachments: RelayedAttachment[];
   metadata?: Record<string, unknown>;
-  supplierMatch: SupplierMatch;
+  contactMatch: ContactMatch;
 }
 
 export interface RelayedWhatsAppPayload {
@@ -32,26 +34,26 @@ export interface RelayedWhatsAppPayload {
   messages: Array<Record<string, unknown>>;
   attachments: RelayedAttachment[];
   metadata?: Record<string, unknown>;
-  supplierMatch: SupplierMatch;
+  contactMatch: ContactMatch;
 }
 
 /** Derive a 32-byte key for AES-256-GCM. */
 function deriveKey(): Buffer {
-  return crypto.createHash("sha256").update(config.supplierEncryptionKey).digest();
+  return crypto.createHash("sha256").update(config.contactEncryptionKey).digest();
 }
 
 /** AES-256-GCM encryption — base64(IV ‖ ciphertext ‖ authTag). */
-export function encryptSupplierName(supplierName: string): string {
+export function encryptContactName(name: string): string {
   const key = deriveKey();
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-  const ciphertext = Buffer.concat([cipher.update(supplierName, "utf8"), cipher.final()]);
+  const ciphertext = Buffer.concat([cipher.update(name, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([iv, ciphertext, tag]).toString("base64");
 }
 
-/** Inverse of encryptSupplierName. */
-export function decryptSupplierName(encrypted: string): string {
+/** Inverse of encryptContactName. */
+export function decryptContactName(encrypted: string): string {
   const key = deriveKey();
   const data = Buffer.from(encrypted, "base64");
   const iv = data.subarray(0, 12);
@@ -70,10 +72,16 @@ function relayHeaders(): Record<string, string> {
 }
 
 /** Only non-identifying metadata for Sabai; names and AI reasoning stay on BYOS. */
-function supplierMatchForRelay(match: SupplierMatch): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
+function contactMatchForRelay(match: ContactMatch): Record<string, unknown> {
+  const out: Record<string, unknown> = { kind: match.kind };
   if (match.confidence !== undefined) out.confidence = match.confidence;
   return out;
+}
+
+function contactIdField(match: ContactMatch): { supplier_id?: number; buyer_id?: number } {
+  const numericId = Number.parseInt(match.contactId, 10);
+  if (!Number.isFinite(numericId)) return {};
+  return match.kind === "buyer" ? { buyer_id: numericId } : { supplier_id: numericId };
 }
 
 async function postRelayJson(pathname: string, payload: Record<string, unknown>): Promise<void> {
@@ -93,7 +101,7 @@ async function postRelayJson(pathname: string, payload: Record<string, unknown>)
 
 /**
  * Maps a RelayedAttachment to the wire format for Sabai.
- * Filenames are never sent — they often contain supplier names
+ * Filenames are never sent — they often contain contact names
  * (e.g. "AcmeDistillers_pricelist.xlsx") which would leak identity.
  */
 function attachmentForRelay(a: RelayedAttachment): Record<string, unknown> {
@@ -115,8 +123,8 @@ export async function relayEmail(payload: RelayedEmailPayload): Promise<void> {
     html: payload.html,
     attachments: payload.attachments.map(attachmentForRelay),
     metadata: payload.metadata ?? {},
-    supplier_match: supplierMatchForRelay(payload.supplierMatch),
-    supplier_id: parseInt(payload.supplierMatch.supplierId, 10),
+    contact_match: contactMatchForRelay(payload.contactMatch),
+    ...contactIdField(payload.contactMatch),
   });
 }
 
@@ -130,7 +138,7 @@ export async function relayWhatsApp(payload: RelayedWhatsAppPayload): Promise<vo
     messages: payload.messages,
     attachments: payload.attachments.map(attachmentForRelay),
     metadata: payload.metadata ?? {},
-    supplier_match: supplierMatchForRelay(payload.supplierMatch),
-    supplier_id: parseInt(payload.supplierMatch.supplierId, 10),
+    contact_match: contactMatchForRelay(payload.contactMatch),
+    ...contactIdField(payload.contactMatch),
   });
 }

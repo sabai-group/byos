@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>BYOS Supplier Roster</title>
+    <title>Encrypted BYOS Portal</title>
     <style>
       :root {
         color-scheme: dark;
@@ -123,6 +123,30 @@
         border: 1px solid rgba(255, 255, 255, 0.08);
       }
 
+      .tabs {
+        display: flex;
+        gap: 4px;
+        margin: 8px 0 20px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+
+      .tab-button {
+        width: auto;
+        margin-top: 0;
+        background: transparent;
+        color: var(--muted);
+        border: none;
+        border-bottom: 2px solid transparent;
+        border-radius: 0;
+        padding: 10px 16px;
+        font-weight: 600;
+      }
+
+      .tab-button.active {
+        color: var(--text);
+        border-bottom-color: var(--accent);
+      }
+
       .qr-wrap {
         margin-top: 14px;
       }
@@ -153,8 +177,8 @@
   <body>
     <main>
       <section id="login-panel" class="panel hidden">
-        <h1>BYOS Supplier Roster <span class="version-tag">v1.0</span></h1>
-        <p>Enter the deployment password to view and update the supplier roster JSON.</p>
+        <h1>Encrypted BYOS Portal <span class="version-tag">v1.1</span></h1>
+        <p>Enter the deployment password to manage the encrypted supplier and buyer rosters.</p>
         <label for="password">Password</label>
         <input id="password" type="password" autocomplete="current-password" />
         <button id="login-button">Log In</button>
@@ -164,8 +188,8 @@
       <section id="app-panel" class="panel hidden">
         <div class="row">
           <div>
-            <h2>Supplier Roster</h2>
-            <p>Suppliers are stored encrypted in Sabai. Names are decrypted locally for display.</p>
+            <h1>Encrypted BYOS Portal <span class="version-tag">v1.1</span></h1>
+            <p>Suppliers and buyers are stored encrypted in Sabai. Names are decrypted locally for display.</p>
           </div>
           <div style="text-align:right">
             <button id="logout-button" class="secondary">Log Out</button>
@@ -186,26 +210,35 @@
         </div>
 
         <div class="card">
-          <h2>Add Supplier</h2>
-          <p>The name is encrypted before being sent to SABAI Group.</p>
-          <label for="new-supplier-name">Supplier Name</label>
-          <input id="new-supplier-name" type="text" placeholder="Acme Corp" />
-          <button id="add-supplier-button">Add Supplier</button>
-          <div id="add-supplier-status" class="status"></div>
-        </div>
+          <div class="tabs" role="tablist">
+            <button class="tab-button active" role="tab" data-kind="supplier">Suppliers</button>
+            <button class="tab-button" role="tab" data-kind="buyer">Buyers</button>
+          </div>
 
-        <div class="card">
-          <h2>Current Suppliers</h2>
-          <button id="refresh-roster-button" class="secondary" style="margin-bottom:12px">Refresh</button>
-          <table id="supplier-table" style="width:100%;border-collapse:collapse;">
-            <thead>
-              <tr>
-                <th style="text-align:left;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.12);">Name</th>
-              </tr>
-            </thead>
-            <tbody id="supplier-tbody"></tbody>
-          </table>
-          <div id="app-status" class="status"></div>
+          <div id="contact-section">
+            <div>
+              <h2 id="contact-add-heading">Add Supplier</h2>
+              <p id="contact-add-description">The name is encrypted before being sent to SABAI Group.</p>
+              <label for="new-contact-name" id="contact-add-label">Supplier Name</label>
+              <input id="new-contact-name" type="text" placeholder="Acme Corp" />
+              <button id="add-contact-button">Add Supplier</button>
+              <div id="add-contact-status" class="status"></div>
+            </div>
+
+            <div style="margin-top: 24px;">
+              <h2 id="contact-list-heading">Current Suppliers</h2>
+              <button id="refresh-roster-button" class="secondary" style="margin-bottom:12px">Refresh</button>
+              <table id="contact-table" style="width:100%;border-collapse:collapse;">
+                <thead>
+                  <tr>
+                    <th style="text-align:left;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.12);">Name</th>
+                  </tr>
+                </thead>
+                <tbody id="contact-tbody"></tbody>
+              </table>
+              <div id="app-status" class="status"></div>
+            </div>
+          </div>
         </div>
       </section>
     </main>
@@ -215,9 +248,32 @@
       const appPanel = document.getElementById("app-panel");
       const loginStatus = document.getElementById("login-status");
       const appStatus = document.getElementById("app-status");
-      const supplierTbody = document.getElementById("supplier-tbody");
-      const addSupplierStatus = document.getElementById("add-supplier-status");
+      const contactTbody = document.getElementById("contact-tbody");
+      const addContactStatus = document.getElementById("add-contact-status");
       const whatsappStatus = document.getElementById("whatsapp-status");
+      const contactAddHeading = document.getElementById("contact-add-heading");
+      const contactAddLabel = document.getElementById("contact-add-label");
+      const contactListHeading = document.getElementById("contact-list-heading");
+      const addContactButton = document.getElementById("add-contact-button");
+      const newContactInput = document.getElementById("new-contact-name");
+      const tabButtons = Array.from(document.querySelectorAll(".tab-button"));
+
+      const KIND_COPY = {
+        supplier: {
+          listKey: "suppliers",
+          title: "Supplier",
+          titlePlural: "Suppliers",
+          placeholder: "Acme Corp",
+        },
+        buyer: {
+          listKey: "buyers",
+          title: "Buyer",
+          titlePlural: "Buyers",
+          placeholder: "Global Importers Inc.",
+        },
+      };
+
+      let currentKind = "supplier";
 
       function whatsappQrWrap() {
         return document.getElementById("whatsapp-qr-wrap");
@@ -307,19 +363,48 @@
         startWhatsappPoll();
       }
 
+      function applyKindCopy() {
+        const copy = KIND_COPY[currentKind];
+        contactAddHeading.textContent = `Add ${copy.title}`;
+        contactAddLabel.textContent = `${copy.title} Name`;
+        contactListHeading.textContent = `Current ${copy.titlePlural}`;
+        addContactButton.textContent = `Add ${copy.title}`;
+        newContactInput.placeholder = copy.placeholder;
+      }
+
       async function loadRoster() {
-        const roster = await api("/api/roster");
-        supplierTbody.innerHTML = "";
-        for (const s of roster.suppliers || []) {
+        const copy = KIND_COPY[currentKind];
+        const roster = await api(`/api/roster?kind=${encodeURIComponent(currentKind)}`);
+        contactTbody.innerHTML = "";
+        const rows = roster[copy.listKey] || [];
+        for (const s of rows) {
           const tr = document.createElement("tr");
           const tdName = document.createElement("td");
           tdName.style.cssText = "padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.06);";
           tdName.textContent = s.canonicalName;
           tr.appendChild(tdName);
-          supplierTbody.appendChild(tr);
+          contactTbody.appendChild(tr);
         }
-        appStatus.textContent = `Loaded ${(roster.suppliers || []).length} suppliers.`;
+        appStatus.textContent = `Loaded ${rows.length} ${copy.titlePlural.toLowerCase()}.`;
         appStatus.className = "status";
+      }
+
+      async function switchKind(kind) {
+        if (!KIND_COPY[kind] || kind === currentKind) return;
+        currentKind = kind;
+        for (const btn of tabButtons) {
+          btn.classList.toggle("active", btn.dataset.kind === kind);
+        }
+        applyKindCopy();
+        addContactStatus.textContent = "";
+        addContactStatus.className = "status";
+        newContactInput.value = "";
+        try {
+          await loadRoster();
+        } catch (error) {
+          appStatus.textContent = error.message;
+          appStatus.className = "status error";
+        }
       }
 
       function renderWhatsappState(state) {
@@ -392,9 +477,10 @@
           return;
         }
         showApp();
+        applyKindCopy();
         try { await loadRoster(); } catch (error) {
           console.error("Failed to load roster:", error);
-          appStatus.textContent = "Failed to load suppliers.";
+          appStatus.textContent = `Failed to load ${currentKind}s.`;
           appStatus.className = "status error";
         }
         try { await loadWhatsappStatus(); } catch (error) {
@@ -419,9 +505,10 @@
         }
         loginStatus.textContent = "";
         showApp();
+        applyKindCopy();
         try { await loadRoster(); } catch (error) {
           console.error("Failed to load roster:", error);
-          appStatus.textContent = "Failed to load suppliers.";
+          appStatus.textContent = `Failed to load ${currentKind}s.`;
           appStatus.className = "status error";
         }
         try { await loadWhatsappStatus(); } catch (error) {
@@ -459,28 +546,34 @@
         }
       });
 
-      document.getElementById("add-supplier-button").addEventListener("click", async () => {
-        const nameInput = document.getElementById("new-supplier-name");
-        const name = nameInput.value.trim();
+      for (const btn of tabButtons) {
+        btn.addEventListener("click", () => {
+          switchKind(btn.dataset.kind);
+        });
+      }
+
+      addContactButton.addEventListener("click", async () => {
+        const copy = KIND_COPY[currentKind];
+        const name = newContactInput.value.trim();
         if (!name) {
-          addSupplierStatus.textContent = "Supplier name is required.";
-          addSupplierStatus.className = "status error";
+          addContactStatus.textContent = `${copy.title} name is required.`;
+          addContactStatus.className = "status error";
           return;
         }
-        addSupplierStatus.textContent = "Adding...";
-        addSupplierStatus.className = "status";
+        addContactStatus.textContent = "Adding...";
+        addContactStatus.className = "status";
         try {
-          await api("/api/suppliers", {
+          await api("/api/contacts", {
             method: "POST",
-            body: JSON.stringify({ name }),
+            body: JSON.stringify({ kind: currentKind, name }),
           });
-          addSupplierStatus.textContent = `Added "${name}".`;
-          addSupplierStatus.className = "status success";
-          nameInput.value = "";
+          addContactStatus.textContent = `Added "${name}".`;
+          addContactStatus.className = "status success";
+          newContactInput.value = "";
           await loadRoster();
         } catch (error) {
-          addSupplierStatus.textContent = error.message;
-          addSupplierStatus.className = "status error";
+          addContactStatus.textContent = error.message;
+          addContactStatus.className = "status error";
         }
       });
 
@@ -496,4 +589,4 @@
       bootstrap();
     </script>
   </body>
-  </html>
+</html>

@@ -32,6 +32,21 @@ It runs three things in one container:
 docker compose up --build
 ```
 
+**Quick and dirty local dev** (plain `docker build` + `docker run` from this directory, with a named volume for WhatsApp auth and bind mounts for runtime + roster):
+
+```bash
+docker build -t byos . && docker run --rm \
+  --name byos \
+  --hostname byos \
+  --env-file .env \
+  -p 8787:8787 \
+  -p 2525:2525 \
+  -v byos_whatsapp_auth:/app/data/.wwebjs_auth \
+  -v "$(pwd)/data/runtime:/app/data/runtime" \
+  -v "$(pwd)/data/supplier-roster.json:/app/data/supplier-roster.json" \
+  byos
+```
+
 The web UI is available on `http://localhost:8787` by default.
 
 ## Important Env Vars
@@ -99,7 +114,7 @@ docker logout ghcr.io 2>/dev/null || true
 gh auth token | docker login ghcr.io -u "$(gh api user -q .login)" --password-stdin
 ```
 
-**3. Build and push** (from `backend/byos/`):
+**3. Build and push**:
 
 For multi-arch builds (amd64 + arm64):
 
@@ -109,6 +124,20 @@ docker buildx build --platform linux/amd64,linux/arm64 \
 ```
 
 The package must be **public** on GitHub (Settings → Packages → `byos` → Danger Zone → Make public) so customer Droplets can pull without authentication. Watchtower on the Droplet polls hourly and restarts with the new image automatically.
+
+### Faster: build on Google Cloud Build
+
+If your local upload is slow, run the multi-arch build on Cloud Build (project `mr-stanley`, already configured with the `ghcr-token` secret). From this directory:
+
+```bash
+gcloud builds submit --config cloudbuild.yaml --project=mr-stanley
+```
+
+If your `gh` token rotates, refresh the secret:
+
+```bash
+gh auth token | gcloud secrets versions add ghcr-token --data-file=- --project=mr-stanley
+```
 
 ### Push fails: `permission_denied: The token provided does not match expected scopes`
 

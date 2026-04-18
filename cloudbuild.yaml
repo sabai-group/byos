@@ -1,0 +1,35 @@
+# Build and push BYOS multi-arch image to GHCR from Cloud Build.
+#
+# One-time setup (store a GitHub PAT with read:packages + write:packages):
+#   echo -n "ghp_YOUR_TOKEN" | gcloud secrets create ghcr-token --data-file=-
+#   gcloud secrets add-iam-policy-binding ghcr-token \
+#     --member="serviceAccount:$(gcloud projects describe $(gcloud config get project) --format='value(projectNumber)')@cloudbuild.gserviceaccount.com" \
+#     --role="roles/secretmanager.secretAccessor"
+#
+# Run:
+#   cd byos
+#   gcloud builds submit --config cloudbuild.yaml --machine-type=e2-highcpu-32
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -e
+        docker run --privileged --rm tonistiigi/binfmt --install all
+        docker buildx create --name cb --driver docker-container --use
+        docker buildx inspect --bootstrap
+        echo "$$GHCR_TOKEN" | docker login ghcr.io -u ramicaza --password-stdin
+        docker buildx build --platform linux/amd64,linux/arm64 \
+          -t ghcr.io/sabai-group/byos:latest --push .
+    secretEnv: ['GHCR_TOKEN']
+
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/ghcr-token/versions/latest
+      env: GHCR_TOKEN
+
+timeout: 1800s
+options:
+  machineType: E2_HIGHCPU_32
