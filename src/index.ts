@@ -6,6 +6,11 @@ import { notifySenderBounceEmail } from "./notify";
 import { relayEmail, relayWhatsApp } from "./relay";
 import { fetchRoster } from "./roster";
 import { startSmtpServer } from "./smtp";
+import {
+  fetchUserRoster,
+  isKnownEmailSender,
+  isKnownWhatsAppSender,
+} from "./userRoster";
 import { createWebApp } from "./web";
 import { startWhatsAppService } from "./whatsapp";
 
@@ -24,6 +29,20 @@ async function main() {
   const whatsappService = await startWhatsAppService({
     onBatch: async (batch) => {
       const kind = config.whatsappContactKind;
+      // Sender gate: only forward messages from known Sabai users for this
+      // customer. Unknown senders get a one-line WhatsApp warning and we
+      // never call fetchRoster / relay for them.
+      const userRoster = await fetchUserRoster();
+      if (!isKnownWhatsAppSender(userRoster, batch.from)) {
+        console.warn(
+          `[byos:whatsapp] rejected unknown sender ${batch.from}: not registered as a Sabai user`,
+        );
+        await whatsappService.sendSenderWarning(
+          batch.from,
+          "BYOS only relays messages from registered Sabai users. Ask your admin to add your WhatsApp number to your Sabai account.",
+        );
+        return;
+      }
       const roster = await fetchRoster(kind);
       const redacted = await detectAndRedactWhatsApp(roster, {
         from: batch.from,
@@ -72,6 +91,26 @@ async function main() {
 
   const smtpServer = await startSmtpServer({
     onEmail: async (email) => {
+      // Sender gate: only accept email from known Sabai users for this
+      // customer. Unknown senders get the existing bounce flow with a
+      // sender-not-registered reason and the message is not relayed.
+      const senderEmail = extractEmailAddress(email.from);
+      const userRoster = await fetchUserRoster();
+      if (!isKnownEmailSender(userRoster, senderEmail)) {
+        const reason = "Sender is not registered as a Sabai user.";
+        console.warn(
+          `[byos:smtp] rejected unknown sender from=${email.from} (to=${email.to}): ${reason}`,
+        );
+        if (senderEmail) {
+          await notifySenderBounceEmail({
+            senderEmail,
+            kind: email.kind,
+            reason,
+            originalSubject: email.subject,
+          });
+        }
+        return;
+      }
       const roster = await fetchRoster(email.kind);
       const redacted = await detectAndRedactEmail(roster, email);
       if (!redacted.matched) {
