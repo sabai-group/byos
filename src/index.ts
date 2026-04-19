@@ -106,7 +106,6 @@ async function main() {
             senderEmail,
             kind: email.kind,
             reason,
-            originalSubject: email.subject,
           });
         }
         return;
@@ -117,6 +116,11 @@ async function main() {
         // Couldn't identify the contact — email the original sender a bounce
         // explanation via Sabai's SendGrid. Applies to both supplier (offers@)
         // and buyer (requests@) misses.
+        //
+        // We deliberately do NOT pass the original subject (or any other
+        // inbound-message content) to Sabai here: this is exactly the path
+        // where redaction failed, so the subject may still contain the
+        // contact identifiers BYOS exists to keep on-prem.
         const senderEmail = extractEmailAddress(email.from);
         console.warn(
           `[byos:smtp] unmatched ${email.kind} from=${email.from} (to=${email.to}): ${redacted.reason}`,
@@ -126,7 +130,6 @@ async function main() {
             senderEmail,
             kind: email.kind,
             reason: redacted.reason,
-            originalSubject: email.subject,
           });
         }
         return;

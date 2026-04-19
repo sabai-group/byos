@@ -16,17 +16,23 @@ export interface SenderBounceEmailRequest {
   senderEmail: string;
   kind: ContactKind;
   reason: string;
-  originalSubject?: string;
 }
 
-/** Best-effort; any failure is logged but does NOT block the SMTP response. */
+/**
+ * Best-effort; any failure is logged but does NOT block the SMTP response.
+ *
+ * Deliberately does NOT forward the original email subject (or any other
+ * inbound-message content). The whole point of BYOS is that Sabai never sees
+ * sender-side text that may contain unredacted contact identifiers, and the
+ * unmatched-contact path is exactly the case where redaction couldn't run.
+ * `reason` is a fixed BYOS-generated string and is safe to send verbatim.
+ */
 export async function notifySenderBounceEmail(req: SenderBounceEmailRequest): Promise<void> {
   const body = JSON.stringify({
     channel: "email",
     sender_email: req.senderEmail,
     kind: req.kind,
     reason: req.reason,
-    original_subject: req.originalSubject,
   });
   try {
     const response = await fetch(`${config.sabaiBaseUrl}/byos/notify-sender-bounce`, {
