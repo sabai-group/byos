@@ -158,6 +158,53 @@ function buildHeuristicRedactions(inputs: string[], contact: ContactRecord, kind
   return dedupeRedactions(redactions);
 }
 
+/**
+ * Defense-in-depth post-pass: once we have confirmed via AI/heuristic that a
+ * message belongs to a known supplier/buyer, pattern-match on contact-details
+ * that the LLM tends to miss in signature blocks — phone/fax/mobile numbers
+ * (international or labeled) and loose email addresses. These patterns are
+ * high-signal in trading-offer context and unlikely to appear legitimately in
+ * offer bodies (prices carry currency symbols, quantities carry units, etc.).
+ *
+ * Only invoked on the matched path, so we never scrub unrelated content.
+ */
+function buildContactDetailRedactions(inputs: string[], kind: ContactKind, existing: RedactionRule[]): RedactionRule[] {
+  const label = redactionLabel(kind);
+  // If an earlier redaction already turned a region into the label, don't
+  // re-match inside the label itself (avoids pointless `[REDACTED SUPPLIER]`
+  // containing a `+` being re-processed).
+  const alreadyRedacted = new Set(existing.map((rule) => rule.replacement));
+  const patterns: RegExp[] = [
+    // Labeled phone/fax lines: captures the label + number together so the
+    // "Tel:" / "Fax:" prefix is also hidden (otherwise a lone "Tel:" with the
+    // number masked still signals that contact-info lived here, which is fine,
+    // but the label itself carries no PII so we fold it in for cleaner output).
+    /(?:Tel|Tel\.|Telephone|Telefon|Phone|Mob|Mob\.|Mobile|Cell|Cell\.|WhatsApp|Skype|Fax|Fax\.)\s*[:.\-]?\s*\+?[\d][\d\s\-().\/]{5,}\d/gi,
+    // Bare international phone numbers (must start with +, >= 7 digits total
+    // so we don't eat short codes or "+1" stray references).
+    /\+\d[\d\s\-().\/]{6,}\d/g,
+    // Email addresses — supplier/buyer sig-block emails. The outer `from` is
+    // handled separately and passes through unchanged; this only scrubs
+    // addresses that appear in the body/subject.
+    /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g,
+    // Bare URLs / www.* references in signatures.
+    /\b(?:https?:\/\/|www\.)[^\s<>"']+/gi,
+  ];
+  const redactions: RedactionRule[] = [];
+  for (const input of inputs) {
+    if (!input) continue;
+    for (const pattern of patterns) {
+      for (const match of input.matchAll(pattern)) {
+        const hit = match[0];
+        if (!hit) continue;
+        if (alreadyRedacted.has(hit)) continue;
+        redactions.push({ needle: hit, replacement: label });
+      }
+    }
+  }
+  return dedupeRedactions(redactions);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -208,39 +255,70 @@ function parseAiRedactionResult(raw: string): AiRedactionResult | null {
 
 function aiSystemPrompt(kind: ContactKind): string {
   const label = redactionLabel(kind);
-  if (kind === "buyer") {
-    // Mirrors the intuition of backend deduce_requester_name: the buyer is NOT
-    // the sender (the sender is usually an internal employee relaying a
-    // customer request), so look for explicit customer/client mentions.
-    return (
-      "You identify which buyer (the customer/client the message is about) sent or is referenced in a "
-      + "message and produce exact literal redaction rules. The BUYER IS NOT THE SENDER — the sender is "
-      + "usually an internal employee relaying a customer's request. Look for phrases like "
-      + "'requester: ...', 'client: ...', 'customer is ...', 'for <name>', or other explicit mentions. "
-      + "canonicalName must exactly match one buyer from the roster or be null when the buyer is "
-      + "ambiguous or unknown — do NOT guess. Each redaction must be a literal case-sensitive substring "
-      + "copied verbatim from the provided input. Never use regex syntax. If the buyer name is short or "
-      + "ambiguous, expand the needle with nearby words so it uniquely targets the buyer mention. Each "
-      + `replacement must preserve the surrounding text and replace only the buyer-identifying portion with ${label}. `
-      + "Do NOT emit redactions that target the outer sender's name or email address — that sender is "
-      + "the relaying employee and must pass through unchanged. "
-      + "Use an empty redactions array when no redaction is needed."
-    );
-  }
+  const counterparty = kind === "buyer" ? "buyer" : "supplier";
+  const counterpartyUpper = counterparty.toUpperCase();
+
+  const identificationGuidance =
+    kind === "buyer"
+      ? // Mirrors the intuition of backend deduce_requester_name: the buyer is NOT
+        // the sender (the sender is usually an internal employee relaying a
+        // customer request), so look for explicit customer/client mentions.
+        "You identify which buyer (the customer/client the message is about) sent or is referenced in a "
+        + "message and produce exact literal redaction rules. The BUYER IS NOT THE SENDER — the sender is "
+        + "usually an internal employee relaying a customer's request. Look for phrases like "
+        + "'requester: ...', 'client: ...', 'customer is ...', 'for <name>', or other explicit mentions. "
+      : "You identify which supplier (the seller the offer is from) is referenced in a message and "
+        + "produce exact literal redaction rules. The SUPPLIER IS USUALLY NOT THE SENDER — the sender is "
+        + "typically an internal employee forwarding a supplier's offer list. Look at quoted/forwarded "
+        + "thread headers ('From: ...', 'Sent by ...'), email signatures, file/attachment names, and "
+        + "explicit mentions in the body to identify the supplier. Do not assume the From: address of the "
+        + "outermost message is the supplier. ";
+
   return (
-    "You identify which supplier (the seller the offer is from) is referenced in a message and "
-    + "produce exact literal redaction rules. The SUPPLIER IS USUALLY NOT THE SENDER — the sender is "
-    + "typically an internal employee forwarding a supplier's offer list. Look at quoted/forwarded "
-    + "thread headers ('From: ...', 'Sent by ...'), email signatures, file/attachment names, and "
-    + "explicit mentions in the body to identify the supplier. Do not assume the From: address of the "
-    + "outermost message is the supplier. canonicalName must exactly match one supplier from the "
-    + "roster or be null when ambiguous or unknown — do NOT guess. Each redaction must be a literal "
-    + "case-sensitive substring copied verbatim from the provided input. Never use regex syntax. If "
-    + "the supplier name is short or ambiguous, expand the needle with nearby words so it uniquely "
-    + "targets the supplier mention. Each replacement must preserve the surrounding text and replace "
-    + `only the supplier-identifying portion with ${label}. Do NOT emit redactions that target the `
-    + "outer sender's name or email address — that sender is the relaying employee and must pass "
-    + "through unchanged. Use an empty redactions array when no redaction is needed."
+    identificationGuidance
+    + `canonicalName must exactly match one ${counterparty} from the roster or be null when the `
+    + `${counterparty} is ambiguous or unknown — do NOT guess.\n\n`
+    + `REDACTION SCOPE — emit a redaction for EVERY piece of ${counterparty}-identifying content you `
+    + "can see, not just the company name. Downstream readers will use any of these signals to "
+    + `re-identify the ${counterparty}, so all of them must be scrubbed:\n`
+    + `  • Company / trade / brand names and any aliases of the ${counterparty}.\n`
+    + "  • Contact-person names that appear in signatures, greetings, or 'From:' lines (first names, "
+    + "    last names, initials, Mr./Ms./Dr. forms, and any 'Best regards, <name>' block).\n"
+    + "  • Phone, mobile, fax, WhatsApp, and Skype numbers — in any format, with or without country "
+    + "    code, whether labeled ('Tel:', 'Fax:', 'Mob:', 'T.', 'P.') or bare.\n"
+    + "  • Postal / physical addresses — street + number, floor/office, city, postal code, region, "
+    + "    country. Redact the full address line(s), not just the city.\n"
+    + `  • Email addresses belonging to the ${counterparty} (personal, sales@…, info@…, etc.), `
+    + `    including the local part, the full address, and the ${counterparty}'s email domain when it `
+    + "    appears on its own.\n"
+    + `  • Website URLs and social-media handles of the ${counterparty}.\n`
+    + `  • Tax / VAT / registration numbers and company IDs tied to the ${counterparty}.\n`
+    + "  • Logos/image references and attachment filenames that embed the company name.\n\n"
+    + "Each redaction must be a literal case-sensitive substring copied verbatim from the provided "
+    + "input. Never use regex syntax. If a needle is short or ambiguous (e.g. a common first name), "
+    + "expand it with nearby words so it uniquely targets the identifying mention and does not match "
+    + "unrelated content. Each replacement must preserve the surrounding text and replace only the "
+    + `${counterparty}-identifying portion with ${label}. It is fine — and often correct — to emit many `
+    + "redactions for a single message (one per signature line, phone number, address line, etc.). "
+    + `Use an empty redactions array ONLY when the message truly contains no ${counterparty}-identifying `
+    + "content.\n\n"
+    + "Do NOT emit redactions that target the outer sender's name or email address — that sender is "
+    + "the relaying employee and must pass through unchanged.\n\n"
+    + "EXAMPLE. Given a signature block like:\n"
+    + "  Thank you,\n"
+    + "  Best Regards,\n"
+    + "  Jane Doe.\n"
+    + "  Acme Beverages Ltd.\n"
+    + "  12 Market Street, Office 3\n"
+    + "  1010 Limassol, Cyprus\n"
+    + "  Tel.: +357 25 123 456\n"
+    + "  Fax: +357 25 123 457\n"
+    + "  jane.doe@acme-bev.com | www.acme-bev.com\n"
+    + `a correct response emits one redaction per identifying line: 'Jane Doe.' → ${label}, `
+    + `'Acme Beverages Ltd.' → ${label}, '12 Market Street, Office 3' → ${label}, '1010 Limassol, Cyprus' → ${label}, `
+    + `'Tel.: +357 25 123 456' → ${label}, 'Fax: +357 25 123 457' → ${label}, `
+    + `'jane.doe@acme-bev.com | www.acme-bev.com' → ${label}. Missing any of these is a FAILURE because `
+    + `the ${counterpartyUpper} can still be identified from what remains.`
   );
 }
 
@@ -356,14 +434,21 @@ export async function detectAndRedactEmail(
     return { matched: false, reason: result.reason };
   }
   const { contact, aiResult } = result;
-  const redactions = dedupeRedactions([
-    ...(aiResult?.redactions ?? []),
-    ...buildHeuristicRedactions(
-      [email.from, email.subject ?? "", email.text ?? "", email.html ?? ""],
-      contact,
-      roster.kind,
-    ),
-  ]);
+  const baseInputs = [email.subject ?? "", email.text ?? "", email.html ?? ""];
+  const aiRedactions = aiResult?.redactions ?? [];
+  const heuristicRedactions = buildHeuristicRedactions(
+    [email.from, ...baseInputs],
+    contact,
+    roster.kind,
+  );
+  // const detailRedactions = buildContactDetailRedactions(
+  //   // Deliberately skip `email.from`: the outer sender passes through unchanged.
+  //   baseInputs,
+  //   roster.kind,
+  //   [...aiRedactions, ...heuristicRedactions],
+  // );
+  // const redactions = dedupeRedactions([...aiRedactions, ...heuristicRedactions, ...detailRedactions]);
+  const redactions = [...aiRedactions, ...heuristicRedactions];
 
   return {
     matched: true,
@@ -398,14 +483,23 @@ export async function detectAndRedactWhatsApp(
     return { matched: false, reason: result.reason };
   }
   const { contact, aiResult } = result;
-  const redactions = dedupeRedactions([
-    ...(aiResult?.redactions ?? []),
-    ...buildHeuristicRedactions(
-      [payload.from, payload.text ?? "", ...payload.messages.map((message) => (typeof message.text === "string" ? message.text : ""))],
-      contact,
-      roster.kind,
-    ),
-  ]);
+  const messageTexts = payload.messages.map((message) =>
+    typeof message.text === "string" ? message.text : "",
+  );
+  const aiRedactions = aiResult?.redactions ?? [];
+  const heuristicRedactions = buildHeuristicRedactions(
+    [payload.from, payload.text ?? "", ...messageTexts],
+    contact,
+    roster.kind,
+  );
+  // const detailRedactions = buildContactDetailRedactions(
+  //   // Skip `payload.from`: per-message sender passes through unchanged.
+  //   [payload.text ?? "", ...messageTexts],
+  //   roster.kind,
+  //   [...aiRedactions, ...heuristicRedactions],
+  // );
+  // const redactions = dedupeRedactions([...aiRedactions, ...heuristicRedactions, ...detailRedactions]);
+  const redactions = [...aiRedactions, ...heuristicRedactions];
   const redactedText = redactText(payload.text, redactions);
   // Per-message `from` is left intact: WhatsApp forwards rarely carry the
   // original sender's identity anyway, and when present it's the relaying
