@@ -13,6 +13,15 @@ function parseBoolEnv(name: string, fallback: boolean): boolean {
   return ["1", "true", "yes", "on"].includes(raw.toLowerCase());
 }
 
+function parseCsvEnv(name: string): string[] {
+  const raw = process.env[name];
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+}
+
 export const config = {
   webPort: parseIntEnv("BYOS_PORT", 8787),
   smtpPort: parseIntEnv("BYOS_SMTP_PORT", 2525),
@@ -28,6 +37,17 @@ export const config = {
   aiApiKey: process.env.OPENAI_API_KEY ?? "",
   aiBaseUrl: process.env.OPENAI_BASE_URL ?? undefined,
   aiModel: process.env.BYOS_AI_MODEL ?? "gpt-4.1-mini",
+  /**
+   * Email domains that should bypass the regex-based defense-in-depth redaction
+   * post-pass. Typically the BYOS customer's own corporate domain(s) plus the
+   * Sabai relay domain — email addresses on those domains belong to the
+   * relaying employee (or the relay endpoint) rather than the supplier/buyer
+   * whose identity we are trying to scrub, so we want them to pass through
+   * unchanged even when they show up inside a message body. Comma-separated;
+   * matching is suffix-based against the address's domain (`endsWith("@" + d)`
+   * or `endsWith("." + d)`, lowercased).
+   */
+  internalEmailDomains: parseCsvEnv("BYOS_INTERNAL_EMAIL_DOMAINS"),
   whatsappHeadless: parseBoolEnv("WHATSAPP_HEADLESS", true),
   whatsappDebug: parseBoolEnv("WHATSAPP_DEBUG", false),
   whatsappDebounceMs: parseIntEnv("WHATSAPP_DEBOUNCE_MS", 60_000),

@@ -7,9 +7,13 @@ content (supplier OR buyer, depending on CONTACT_KIND) via the OpenAI API (first
 Usage: reads raw xlsx bytes from stdin, writes cleaned xlsx bytes to stdout.
   - OPENAI_API_KEY, OPENAI_BASE_URL, BYOS_AI_MODEL: AI config (from env)
   - CONTACT_ROSTER: JSON array of {canonicalName, aliases} (from env, set by TS caller)
-  - CONTACT_KIND: "supplier" or "buyer".
+  - CONTACT_KIND: "supplier" or "buyer" (controls the system prompt only).
   - REDACTION_LABEL: string to substitute for identifying mentions; defaults
-    to "[REDACTED SUPPLIER]" or "[REDACTED BUYER]" based on CONTACT_KIND.
+    to the generic marker "[REDACTED]" used by the rest of the BYOS redaction
+    pipeline (see byos/src/redact.ts — we deliberately do NOT distinguish
+    [REDACTED SUPPLIER] vs [REDACTED BUYER] since nothing downstream keys off
+    the distinction and a shorter token saves prompt tokens on every
+    subsequent LLM pass over the redacted body).
 
 Exit code 0 on success, non-zero on failure (stderr has the error message).
 """
@@ -42,7 +46,7 @@ def get_redaction_label() -> str:
     explicit = os.environ.get("REDACTION_LABEL")
     if explicit:
         return explicit
-    return "[REDACTED BUYER]" if get_contact_kind() == "buyer" else "[REDACTED SUPPLIER]"
+    return "[REDACTED]"
 
 
 def get_contact_roster() -> list[dict]:

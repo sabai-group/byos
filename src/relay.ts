@@ -14,6 +14,21 @@ export interface RelayedAttachment {
   contentBase64: string;
   contentType: string;
   sizeBytes?: number;
+  /**
+   * MIME `Content-ID` for inline attachments referenced by `<img src="cid:…">`
+   * in the email HTML. Populated from mailparser (normalized, no angle brackets).
+   * Used by BYOS redaction to drop signature-image attachments that were
+   * classified as contact-identifying in the HTML pass — nothing on the Sabai
+   * wire format uses this field. Undefined for regular (non-inline) attachments.
+   */
+  contentId?: string;
+  /**
+   * Original filename as provided by the sender. Kept on the internal shape
+   * for debug logging and for the redaction layer to reason about (e.g. an
+   * Excel attachment named after the supplier); never relayed to Sabai —
+   * see attachmentForRelay which deliberately omits it.
+   */
+  filename?: string;
 }
 
 export interface RelayedEmailPayload {

@@ -83,6 +83,11 @@ export function startSmtpServer(options: {
                 contentBase64: a.content.toString("base64"),
                 contentType: a.contentType ?? "application/octet-stream",
                 sizeBytes: a.size,
+                // mailparser normalizes cid to a bare id (no `<...>`), matching the
+                // `cid:<id>` form used in HTML `<img src="...">`. Leave undefined when
+                // the attachment has no Content-ID (normal, non-inline attachments).
+                contentId: typeof a.contentId === "string" && a.contentId ? a.contentId : undefined,
+                filename: typeof a.filename === "string" && a.filename ? a.filename : undefined,
               })),
           };
 
@@ -90,8 +95,35 @@ export function startSmtpServer(options: {
             `[byos:smtp] received from=${email.from} to=${email.to ?? "(none)"} kind=${kind} subject=${email.subject ?? "(none)"} attachments=${email.attachments.length}`,
           );
 
-          await options.onEmail(email);
+          // Ack the sender BEFORE running the redact + relay pipeline. The
+          // pipeline can take tens of seconds (two concurrent OpenAI calls on
+          // text/HTML + per-attachment Excel redaction + the POST to Sabai
+          // which itself does GCS upload + Cloud Run trigger inline), and the
+          // smtp-server library defaults to a 60s idle timeout on the socket.
+          // Blocking `callback()` on the pipeline means slow emails get a 421
+          // "Timeout - closing connection" response to the sender while the
+          // relay still succeeds on the Sabai side — the sender's MTA then
+          // retries and every retry produces a fresh ingest. Accepting up
+          // front decouples the SMTP response from the pipeline so the 250
+          // fires promptly.
+          //
+          // TODO(obs): forward post-ack onEmail failures to the Sabai server
+          // (e.g. a /byos/ingest-error endpoint) so operators see them in the
+          // main logging/alerting surface instead of only in the BYOS container's
+          // stdout. Right now a post-ack crash silently drops the email --
+          // the sender already got 250, so there is no MTA retry to recover it,
+          // and the only evidence is this console.error on the BYOS host.
+          // Minimum useful payload: { from, to, kind, subject, error_message,
+          // error_stack, received_at }. Must NOT include email body or
+          // attachments -- redaction already failed on this path by definition
+          // (otherwise relay would have succeeded).
           callback();
+          options.onEmail(email).catch((error: unknown) => {
+            console.error(
+              `[byos:smtp] onEmail failed after ack (from=${email.from} to=${email.to ?? "(none)"}):`,
+              error,
+            );
+          });
         })
         .catch((error: unknown) => callback(error instanceof Error ? error : new Error(String(error))));
     },

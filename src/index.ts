@@ -134,7 +134,22 @@ async function main() {
         }
         return;
       }
-      const cleanedAttachments = await redactAttachments(email.attachments, roster);
+      // Filter out inline CID attachments that pass 2 classified as signature
+      // /logo images — they already got replaced by `[REDACTED]` inside the
+      // HTML, and leaving them in the attachment list would let Sabai still
+      // see the original image file. Non-CID attachments pass through.
+      const droppedCidSet = new Set(redacted.droppedCids);
+      const filteredAttachments = droppedCidSet.size
+        ? email.attachments.filter((a) => !(a.contentId && droppedCidSet.has(a.contentId)))
+        : email.attachments;
+      if (droppedCidSet.size) {
+        const droppedCount = email.attachments.length - filteredAttachments.length;
+        console.log(
+          `[byos:smtp] dropped ${droppedCount}/${email.attachments.length} inline signature attachment(s) `
+            + `matching cids=${[...droppedCidSet].join(",")}`,
+        );
+      }
+      const cleanedAttachments = await redactAttachments(filteredAttachments, roster);
       await relayEmail({
         from: redacted.redactedFrom,
         to: email.to,
