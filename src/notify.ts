@@ -16,6 +16,14 @@ export interface SenderBounceEmailRequest {
   senderEmail: string;
   kind: ContactKind;
   reason: string;
+  /**
+   * BYOS archive ID for the offending inbound, if it was archived locally.
+   * When set, Sabai's bounce email links the customer straight to
+   * `${byos_portal_url}/archive/${archiveId}` so they can review the original
+   * message and add the missing contact in one click. Omitted when archiving
+   * failed or hasn't run yet (e.g. transient disk error).
+   */
+  archiveId?: number;
 }
 
 /**
@@ -33,6 +41,7 @@ export async function notifySenderBounceEmail(req: SenderBounceEmailRequest): Pr
     sender_email: req.senderEmail,
     kind: req.kind,
     reason: req.reason,
+    archive_id: req.archiveId,
   });
   try {
     const response = await fetch(`${config.sabaiBaseUrl}/byos/notify-sender-bounce`, {

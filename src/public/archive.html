@@ -1,0 +1,418 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <title>BYOS Archive</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #111827;
+        --panel: #1f2937;
+        --muted: #9ca3af;
+        --text: #f9fafb;
+        --accent: #22c55e;
+        --warn: #f59e0b;
+        --danger: #ef4444;
+        --border: rgba(255, 255, 255, 0.08);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        background: linear-gradient(160deg, #020617, #111827 45%, #1f2937);
+        color: var(--text);
+        min-height: 100vh;
+      }
+
+      main {
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 32px 20px 64px;
+      }
+
+      a { color: var(--accent); }
+      a:hover { opacity: 0.8; }
+
+      h1 { margin-top: 0; font-size: 1.4rem; }
+      h2 { font-size: 1.1rem; margin: 24px 0 10px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+
+      .panel {
+        background: rgba(31, 41, 55, 0.9);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+      }
+
+      .meta-grid {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 4px 16px;
+        font-size: 0.9rem;
+      }
+
+      .meta-label { color: var(--muted); white-space: nowrap; }
+      .meta-value { word-break: break-all; }
+
+      .badge {
+        display: inline-block;
+        padding: 2px 10px;
+        border-radius: 999px;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        vertical-align: middle;
+        margin-left: 8px;
+      }
+      .badge-green { background: rgba(34,197,94,0.15); color: var(--accent); border: 1px solid rgba(34,197,94,0.35); }
+      .badge-yellow { background: rgba(245,158,11,0.15); color: var(--warn); border: 1px solid rgba(245,158,11,0.35); }
+      .badge-red { background: rgba(239,68,68,0.15); color: var(--danger); border: 1px solid rgba(239,68,68,0.35); }
+      .badge-blue { background: rgba(99,102,241,0.15); color: #818cf8; border: 1px solid rgba(99,102,241,0.35); }
+
+      pre {
+        background: rgba(0,0,0,0.35);
+        border-radius: 8px;
+        padding: 14px;
+        overflow-x: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 0.82rem;
+        margin: 0;
+        color: #d1fae5;
+      }
+
+      .iframe-wrap {
+        border-radius: 8px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        background: #fff;
+      }
+      iframe {
+        display: block;
+        width: 100%;
+        border: none;
+        min-height: 300px;
+      }
+
+      .attachment-list { list-style: none; padding: 0; margin: 0; }
+      .attachment-list li {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.88rem;
+      }
+      .attachment-list li:last-child { border-bottom: none; }
+      .attachment-thumb {
+        width: 48px;
+        height: 48px;
+        object-fit: cover;
+        border-radius: 6px;
+        flex-shrink: 0;
+        border: 1px solid var(--border);
+      }
+      .attachment-info { flex: 1; min-width: 0; }
+      .attachment-info a { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .attachment-meta { color: var(--muted); font-size: 0.78rem; margin-top: 2px; }
+
+      .messages-list { display: flex; flex-direction: column; gap: 12px; }
+      .message-bubble {
+        background: rgba(0,0,0,0.25);
+        border-radius: 10px;
+        padding: 10px 14px;
+        font-size: 0.88rem;
+        max-width: 100%;
+      }
+      .message-meta { font-size: 0.75rem; color: var(--muted); margin-bottom: 4px; }
+      .message-body { white-space: pre-wrap; word-break: break-word; }
+
+      .spinner {
+        display: inline-block;
+        width: 20px; height: 20px;
+        border: 3px solid var(--border);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: spin 0.7s linear infinite;
+        vertical-align: middle;
+        margin-right: 8px;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+
+      .error-box {
+        background: rgba(239,68,68,0.1);
+        border: 1px solid rgba(239,68,68,0.3);
+        border-radius: 10px;
+        padding: 16px 20px;
+        color: var(--danger);
+      }
+
+      .back-link { font-size: 0.88rem; margin-bottom: 20px; display: block; }
+
+      #loading { text-align: center; padding: 40px 0; color: var(--muted); }
+      #content { display: none; }
+      #error-container { display: none; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <a class="back-link" href="/">&larr; Back to portal</a>
+
+      <div id="loading"><span class="spinner"></span>Loading…</div>
+
+      <div id="error-container">
+        <div class="error-box" id="error-message"></div>
+      </div>
+
+      <div id="content" class="panel">
+        <h1 id="page-title">Archived offer list</h1>
+        <div class="meta-grid" id="meta-grid"></div>
+
+        <div id="email-section">
+          <div id="text-section">
+            <h2>Body (plain text)</h2>
+            <pre id="email-text"></pre>
+          </div>
+          <div id="html-section">
+            <h2>Body (HTML)</h2>
+            <div class="iframe-wrap">
+              <iframe id="html-frame" sandbox="allow-same-origin" title="Email HTML content"></iframe>
+            </div>
+          </div>
+        </div>
+
+        <div id="whatsapp-section">
+          <h2>Messages</h2>
+          <div id="messages-list" class="messages-list"></div>
+        </div>
+
+        <div id="attachments-section">
+          <h2>Attachments</h2>
+          <ul id="attachment-list" class="attachment-list"></ul>
+        </div>
+      </div>
+    </main>
+
+    <script>
+      // ---------------------------------------------------------------
+      // Helpers
+      // ---------------------------------------------------------------
+      function show(el) { el.style.display = ""; }
+      function hide(el) { el.style.display = "none"; }
+      function esc(str) {
+        return String(str ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+      function fmtBytes(n) {
+        if (n == null) return "";
+        if (n < 1024) return `${n} B`;
+        if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`;
+        return `${(n / 1048576).toFixed(1)} MB`;
+      }
+      function fmtDate(iso) {
+        try { return new Date(iso).toLocaleString(); } catch { return iso; }
+      }
+      function badge(text, variant) {
+        return `<span class="badge badge-${variant}">${esc(text)}</span>`;
+      }
+
+      // ---------------------------------------------------------------
+      // Resolve the archive ID from the URL (/archive/<id> or ?id=<id>)
+      // ---------------------------------------------------------------
+      function resolveId() {
+        const pathMatch = location.pathname.match(/\/archive\/(\d+)/);
+        if (pathMatch) return Number(pathMatch[1]);
+        const p = new URLSearchParams(location.search);
+        const raw = p.get("id");
+        return raw ? Number(raw) : null;
+      }
+
+      // ---------------------------------------------------------------
+      // Fetch + render
+      // ---------------------------------------------------------------
+      async function load() {
+        const loadingEl = document.getElementById("loading");
+        const contentEl = document.getElementById("content");
+        const errorContainer = document.getElementById("error-container");
+        const errorMsg = document.getElementById("error-message");
+
+        const id = resolveId();
+        if (!id || !Number.isFinite(id)) {
+          hide(loadingEl);
+          show(errorContainer);
+          errorMsg.textContent = "No valid archive ID in URL. Use /archive/<id>.";
+          return;
+        }
+
+        let meta;
+        try {
+          const res = await fetch(`/api/archive/${id}`, { credentials: "same-origin" });
+          if (res.status === 401) { location.href = "/"; return; }
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(body.error || `HTTP ${res.status}`);
+          }
+          meta = await res.json();
+        } catch (err) {
+          hide(loadingEl);
+          show(errorContainer);
+          errorMsg.textContent = `Failed to load archive entry: ${err.message}`;
+          return;
+        }
+
+        hide(loadingEl);
+        render(meta);
+        show(contentEl);
+      }
+
+      function render(meta) {
+        document.title = `Archive #${meta.id} — BYOS`;
+        document.getElementById("page-title").innerHTML =
+          `Archived offer list #${meta.id}` +
+          badge(meta.channel, meta.channel === "email" ? "blue" : "green") +
+          (meta.outcome.senderAccepted
+            ? (meta.outcome.contactMatch
+                ? badge("relayed", "green")
+                : badge("unmatched", "yellow"))
+            : badge("rejected", "red"));
+
+        renderMeta(meta);
+
+        if (meta.channel === "email") {
+          renderEmail(meta);
+          hide(document.getElementById("whatsapp-section"));
+        } else {
+          renderWhatsApp(meta);
+          hide(document.getElementById("email-section"));
+        }
+
+        renderAttachments(meta);
+      }
+
+      function metaRow(label, value) {
+        const grid = document.getElementById("meta-grid");
+        const lEl = document.createElement("span");
+        lEl.className = "meta-label";
+        lEl.textContent = label;
+        const vEl = document.createElement("span");
+        vEl.className = "meta-value";
+        vEl.innerHTML = value;
+        grid.appendChild(lEl);
+        grid.appendChild(vEl);
+      }
+
+      function renderMeta(meta) {
+        metaRow("Received", fmtDate(meta.receivedAt));
+        metaRow("From", esc(meta.from));
+        if (meta.to) metaRow("To", esc(meta.to));
+        if (meta.channel === "email") {
+          if (meta.kind) metaRow("Kind", esc(meta.kind));
+          if (meta.localPart) metaRow("Mailbox", esc(meta.localPart));
+          if (meta.subject) metaRow("Subject", esc(meta.subject));
+        }
+        // Outcome rows
+        if (!meta.outcome.senderAccepted) {
+          metaRow("Outcome", `<span class="badge badge-red">Sender rejected</span>`);
+          if (meta.outcome.rejectReason) metaRow("Reason", esc(meta.outcome.rejectReason));
+        } else if (meta.outcome.unmatchedReason) {
+          metaRow("Outcome", `<span class="badge badge-yellow">Contact unmatched</span>`);
+          metaRow("Reason", esc(meta.outcome.unmatchedReason));
+        } else if (meta.outcome.contactMatch) {
+          const cm = meta.outcome.contactMatch;
+          const conf = cm.confidence != null ? ` (${Math.round(cm.confidence * 100)}% confidence)` : "";
+          metaRow("Outcome", `<span class="badge badge-green">Relayed</span>`);
+          metaRow("Contact kind", esc(cm.kind) + conf);
+        }
+      }
+
+      function renderEmail(meta) {
+        const textSection = document.getElementById("text-section");
+        const htmlSection = document.getElementById("html-section");
+
+        if (meta.text) {
+          document.getElementById("email-text").textContent = meta.text;
+        } else {
+          hide(textSection);
+        }
+
+        if (meta.html) {
+          const frame = document.getElementById("html-frame");
+          frame.srcdoc = meta.html;
+          // Auto-size to content once loaded.
+          frame.addEventListener("load", () => {
+            try {
+              frame.style.height = frame.contentDocument.body.scrollHeight + 32 + "px";
+            } catch { /* cross-origin sandbox — leave min-height */ }
+          });
+        } else {
+          hide(htmlSection);
+        }
+
+        if (!meta.text && !meta.html) {
+          hide(document.getElementById("email-section"));
+        }
+      }
+
+      function renderWhatsApp(meta) {
+        const list = document.getElementById("messages-list");
+        const messages = Array.isArray(meta.messages) ? meta.messages : [];
+        if (messages.length === 0) {
+          list.innerHTML = `<p style="color:var(--muted)">No messages recorded.</p>`;
+          return;
+        }
+        for (const m of messages) {
+          const ts = m.timestamp ? fmtDate(String(m.timestamp)) : "";
+          const from = String(m.from || "").replace("whatsapp:", "");
+          const body = String(m.text || m.body || "");
+
+          const bubble = document.createElement("div");
+          bubble.className = "message-bubble";
+          bubble.innerHTML =
+            `<div class="message-meta">${esc(from)}${ts ? `  <span style="opacity:0.6">${esc(ts)}</span>` : ""}</div>` +
+            `<div class="message-body">${esc(body)}</div>`;
+          list.appendChild(bubble);
+        }
+      }
+
+      function renderAttachments(meta) {
+        const section = document.getElementById("attachments-section");
+        const list = document.getElementById("attachment-list");
+        const attachments = Array.isArray(meta.attachments) ? meta.attachments : [];
+        if (attachments.length === 0) { hide(section); return; }
+
+        for (const a of attachments) {
+          const href = `/api/archive/${meta.id}/attachments/${encodeURIComponent(a.storedAs)}`;
+          const isImage = a.contentType && a.contentType.startsWith("image/");
+          const li = document.createElement("li");
+
+          if (isImage) {
+            const img = document.createElement("img");
+            img.className = "attachment-thumb";
+            img.src = href;
+            img.alt = a.filename || a.storedAs;
+            img.loading = "lazy";
+            li.appendChild(img);
+          }
+
+          const info = document.createElement("div");
+          info.className = "attachment-info";
+          info.innerHTML =
+            `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer">${esc(a.filename || a.storedAs)}</a>` +
+            `<div class="attachment-meta">${esc(a.contentType)}${a.sizeBytes != null ? " · " + fmtBytes(a.sizeBytes) : ""}</div>`;
+          li.appendChild(info);
+          list.appendChild(li);
+        }
+      }
+
+      load();
+    </script>
+  </body>
+</html>

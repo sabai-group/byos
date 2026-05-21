@@ -6,6 +6,7 @@ import { config } from "./config";
 import { encryptContactName } from "./relay";
 import { fetchRoster, type ContactKind } from "./roster";
 import type { WhatsAppLinkState } from "./whatsapp";
+import { listArchive, openArchiveAttachment, readArchiveMeta } from "./archive";
 
 function isLikelyQrDataUrl(value: string | null | undefined): boolean {
   if (!value || typeof value !== "string") return false;
@@ -30,6 +31,12 @@ function toPublicWhatsAppState(state: WhatsAppLinkState) {
 
 function parseContactKind(raw: unknown): ContactKind {
   return String(raw ?? "supplier").toLowerCase() === "buyer" ? "buyer" : "supplier";
+}
+
+/** Express types params as string | string[]; normalize to a single string. */
+function routeParam(value: string | string[] | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  return Array.isArray(value) ? value[0] : value;
 }
 
 function listKey(kind: ContactKind): "suppliers" | "buyers" {
@@ -187,6 +194,80 @@ export function createWebApp(options: {
     } catch (error) {
       next(error);
     }
+  });
+
+  /**
+   * List the most recent archived inbounds (newest first, up to 100 entries).
+   */
+  app.get("/api/archive", requireSession, async (_request, response, next) => {
+    try {
+      const items = await listArchive();
+      response.json({ items });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  /**
+   * Full metadata for a single archived inbound.
+   */
+  app.get("/api/archive/:id", requireSession, async (request, response, next) => {
+    try {
+      const id = Number.parseInt(routeParam(request.params.id) ?? "", 10);
+      if (!Number.isFinite(id) || id < 1) {
+        response.status(400).json({ error: "Invalid archive id" });
+        return;
+      }
+      const meta = await readArchiveMeta(id);
+      if (!meta) {
+        response.status(404).json({ error: "Not found" });
+        return;
+      }
+      response.json(meta);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  /**
+   * Stream a stored attachment. The `storedAs` parameter is validated against
+   * the meta entry so arbitrary paths cannot be requested (path-traversal guard).
+   */
+  app.get("/api/archive/:id/attachments/:storedAs", requireSession, async (request, response, next) => {
+    try {
+      const id = Number.parseInt(routeParam(request.params.id) ?? "", 10);
+      if (!Number.isFinite(id) || id < 1) {
+        response.status(400).json({ error: "Invalid archive id" });
+        return;
+      }
+      const storedAs = routeParam(request.params.storedAs);
+      if (!storedAs) {
+        response.status(400).json({ error: "Invalid attachment name" });
+        return;
+      }
+      const result = await openArchiveAttachment(id, storedAs);
+      if (!result) {
+        response.status(404).json({ error: "Attachment not found" });
+        return;
+      }
+      response.setHeader("Content-Type", result.contentType);
+      if (result.sizeBytes !== undefined) {
+        response.setHeader("Content-Length", result.sizeBytes);
+      }
+      // Serve inline so the browser can display images / PDFs directly.
+      response.setHeader("Content-Disposition", `inline; filename="${storedAs}"`);
+      result.stream.pipe(response);
+      result.stream.on("error", next);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  /**
+   * Serve the archive detail page for clean /archive/:id URLs.
+   */
+  app.get("/archive/:id", requireSession, (_request, response) => {
+    response.sendFile(path.join(publicDir, "archive.html"));
   });
 
   app.use(express.static(publicDir));

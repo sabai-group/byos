@@ -511,6 +511,26 @@
         renderWhatsappState(state);
       }
 
+      /**
+       * Read ?kind=supplier|buyer from the URL so deep-links (e.g. from the
+       * Sabai bounce email's "Add the supplier" CTA) land on the correct tab
+       * with the name input focused.
+       */
+      function applyKindFromQuery() {
+        const params = new URLSearchParams(location.search);
+        const raw = params.get("kind");
+        if (raw === "supplier" || raw === "buyer") {
+          currentKind = raw;
+          for (const btn of tabButtons) {
+            btn.classList.toggle("active", btn.dataset.kind === currentKind);
+          }
+          // Defer focus until the next tick so layout has settled after showApp().
+          setTimeout(() => {
+            try { newContactInput.focus(); } catch { /* ignore */ }
+          }, 0);
+        }
+      }
+
       async function bootstrap() {
         let authenticated = false;
         try {
@@ -524,6 +544,7 @@
           return;
         }
         showApp();
+        applyKindFromQuery();
         applyKindCopy();
         try { await loadRoster(); } catch (error) {
           console.error("Failed to load roster:", error);
@@ -552,6 +573,7 @@
         }
         loginStatus.textContent = "";
         showApp();
+        applyKindFromQuery();
         applyKindCopy();
         try { await loadRoster(); } catch (error) {
           console.error("Failed to load roster:", error);

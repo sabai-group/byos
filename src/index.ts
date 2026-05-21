@@ -13,6 +13,7 @@ import {
 } from "./userRoster";
 import { createWebApp } from "./web";
 import { startWhatsAppService } from "./whatsapp";
+import { archiveEmail, archiveWhatsApp, type ArchiveOutcome } from "./archive";
 
 function extractEmailAddress(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
@@ -20,6 +21,27 @@ function extractEmailAddress(raw: string | undefined): string | undefined {
   if (m && m[1]) return m[1].trim();
   const trimmed = raw.trim();
   return trimmed.includes("@") ? trimmed : undefined;
+}
+
+/**
+ * Archive an email failure (sender-rejected or contact-unmatched), then send
+ * the Sabai bounce notification with the archive ID so the email can link
+ * straight to the archived message. Archiving failure is non-fatal — the
+ * notification still goes out, just without a portal link.
+ */
+async function archiveAndBouncEmail(
+  email: Parameters<typeof archiveEmail>[0],
+  outcome: Parameters<typeof archiveEmail>[1],
+  reason: string,
+): Promise<void> {
+  const senderEmail = extractEmailAddress(email.from);
+  const archiveId = await archiveEmail(email, outcome).catch((err: unknown) => {
+    console.error("[byos:archive] email archive failed:", err);
+    return undefined;
+  });
+  if (senderEmail) {
+    await notifySenderBounceEmail({ senderEmail, kind: email.kind, reason, archiveId });
+  }
 }
 
 async function main() {
@@ -41,6 +63,9 @@ async function main() {
           batch.from,
           "BYOS only relays messages from registered Sabai users. Ask your admin to add your WhatsApp number to your Sabai account.",
         );
+        archiveWhatsApp(batch, { senderAccepted: false, rejectReason: "sender not registered as a Sabai user" }).catch((err: unknown) =>
+          console.error("[byos:archive] whatsapp archive failed (sender rejected):", err),
+        );
         return;
       }
       const roster = await fetchRoster(kind);
@@ -59,6 +84,9 @@ async function main() {
           batch.from,
           `BYOS couldn't identify the ${kind} on this message. Please add them in the BYOS portal and resend.`,
         );
+        archiveWhatsApp(batch, { senderAccepted: true, unmatchedReason: redacted.reason }).catch((err: unknown) =>
+          console.error("[byos:archive] whatsapp archive failed (unmatched):", err),
+        );
         return;
       }
       const cleanedAttachments = await redactAttachments(batch.attachments, roster);
@@ -75,6 +103,13 @@ async function main() {
         },
         contactMatch: redacted.contactMatch,
       });
+      const waOutcome: ArchiveOutcome = {
+        senderAccepted: true,
+        contactMatch: { kind: redacted.contactMatch.kind, confidence: redacted.contactMatch.confidence },
+      };
+      archiveWhatsApp(batch, waOutcome).catch((err: unknown) =>
+        console.error("[byos:archive] whatsapp archive failed (relayed):", err),
+      );
     },
   });
 
@@ -97,17 +132,11 @@ async function main() {
       const senderEmail = extractEmailAddress(email.from);
       const userRoster = await fetchUserRoster();
       if (!isKnownEmailSender(userRoster, senderEmail)) {
-        const reason = "Sender is not registered as a Sabai user.";
+        const reason = "Sender is not registered as a 365 user.";
         console.warn(
           `[byos:smtp] rejected unknown sender from=${email.from} (to=${email.to}): ${reason}`,
         );
-        if (senderEmail) {
-          await notifySenderBounceEmail({
-            senderEmail,
-            kind: email.kind,
-            reason,
-          });
-        }
+        await archiveAndBouncEmail(email, { senderAccepted: false, rejectReason: reason }, reason);
         return;
       }
       const roster = await fetchRoster(email.kind);
@@ -121,17 +150,10 @@ async function main() {
         // inbound-message content) to Sabai here: this is exactly the path
         // where redaction failed, so the subject may still contain the
         // contact identifiers BYOS exists to keep on-prem.
-        const senderEmail = extractEmailAddress(email.from);
         console.warn(
           `[byos:smtp] unmatched ${email.kind} from=${email.from} (to=${email.to}): ${redacted.reason}`,
         );
-        if (senderEmail) {
-          await notifySenderBounceEmail({
-            senderEmail,
-            kind: email.kind,
-            reason: redacted.reason,
-          });
-        }
+        await archiveAndBouncEmail(email, { senderAccepted: true, unmatchedReason: redacted.reason }, redacted.reason);
         return;
       }
       // Filter out inline CID attachments that pass 2 classified as signature
@@ -162,6 +184,13 @@ async function main() {
         },
         contactMatch: redacted.contactMatch,
       });
+      const emailOutcome: ArchiveOutcome = {
+        senderAccepted: true,
+        contactMatch: { kind: redacted.contactMatch.kind, confidence: redacted.contactMatch.confidence },
+      };
+      archiveEmail(email, emailOutcome).catch((err: unknown) =>
+        console.error("[byos:archive] email archive failed (relayed):", err),
+      );
     },
   });
 

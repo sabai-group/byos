@@ -54,6 +54,14 @@ export const config = {
   whatsappAuthPath: process.env.WHATSAPP_AUTH_PATH ?? path.resolve(process.cwd(), "data", ".wwebjs_auth"),
   whatsappArtifactsDir:
     process.env.WHATSAPP_ARTIFACTS_DIR ?? path.resolve(process.cwd(), "data", "runtime", "whatsapp"),
+  /** Directory where unredacted inbound archives are stored on disk. */
+  archiveDir:
+    process.env.BYOS_ARCHIVE_DIR ?? path.resolve(process.cwd(), "data", "runtime", "archive"),
+  /**
+   * Maximum number of archived inbound offer lists to retain on disk. Older
+   * entries are pruned after each write. Default 100.
+   */
+  archiveKeep: parseIntEnv("BYOS_ARCHIVE_KEEP", 100),
   whatsappLocale: process.env.WHATSAPP_LOCALE ?? "en-US",
   whatsappTimezone: process.env.WHATSAPP_TIMEZONE ?? "UTC",
   /**
