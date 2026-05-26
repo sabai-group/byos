@@ -193,10 +193,12 @@
       <section id="login-panel" class="panel hidden">
         <h1>Encrypted BYOS Portal <span class="version-tag">v1.1</span></h1>
         <p>Enter the deployment password to manage the encrypted supplier and buyer rosters.</p>
-        <label for="password">Password</label>
-        <input id="password" type="password" autocomplete="current-password" />
-        <button id="login-button">Log In</button>
-        <div id="login-status" class="status"></div>
+        <form id="login-form">
+          <label for="password">Password</label>
+          <input id="password" type="password" autocomplete="current-password" />
+          <button id="login-button" type="submit">Log In</button>
+          <div id="login-status" class="status"></div>
+        </form>
       </section>
 
       <section id="app-panel" class="panel hidden">
@@ -558,7 +560,8 @@
         }
       }
 
-      document.getElementById("login-button").addEventListener("click", async () => {
+      document.getElementById("login-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
         loginStatus.textContent = "Logging in...";
         loginStatus.className = "status";
         try {

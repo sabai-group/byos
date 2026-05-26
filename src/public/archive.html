@@ -155,8 +155,6 @@
       .back-link { font-size: 0.88rem; margin-bottom: 20px; display: block; }
 
       #loading { text-align: center; padding: 40px 0; color: var(--muted); }
-      #content { display: none; }
-      #error-container { display: none; }
     </style>
   </head>
   <body>
@@ -165,11 +163,11 @@
 
       <div id="loading"><span class="spinner"></span>Loading…</div>
 
-      <div id="error-container">
+      <div id="error-container" hidden>
         <div class="error-box" id="error-message"></div>
       </div>
 
-      <div id="content" class="panel">
+      <div id="content" class="panel" hidden>
         <h1 id="page-title">Archived offer list</h1>
         <div class="meta-grid" id="meta-grid"></div>
 
@@ -202,8 +200,8 @@
       // ---------------------------------------------------------------
       // Helpers
       // ---------------------------------------------------------------
-      function show(el) { el.style.display = ""; }
-      function hide(el) { el.style.display = "none"; }
+      function show(el) { el.hidden = false; el.style.display = ""; }
+      function hide(el) { el.hidden = true; el.style.display = "none"; }
       function esc(str) {
         return String(str ?? "")
           .replace(/&/g, "&amp;")
