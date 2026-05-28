@@ -21,6 +21,14 @@ It runs three things in one container:
 - Sends `SABAI_API_KEY` in `X-BYOS-API-Key` so SABAI can authenticate the BYOS client (HTTPS).
 - Sends the sanitized payload to SABAI at `https://sabai365-16c4b4eee4fe.herokuapp.com` by default.
 
+## Viewing Encrypted Names in Sabai365
+
+Because BYOS encrypts supplier (and buyer) names with a key that SABAI never sees, the Sabai365 web portal and Gmail alert emails display those names as `⌁ENC:…` ciphertext by default. To read them back, install the official Chrome extension published on the Chrome Web Store:
+
+**[SABAI Decrypt on the Chrome Web Store](https://chromewebstore.google.com/detail/sabai-decrypt/hmcjafmbenhblaknjicdoccnibkladdl)** — approved and hosted by Google; source at [github.com/sabai-group/sabai-decrypt](https://github.com/sabai-group/sabai-decrypt).
+
+You paste your `SECRET_ENCRYPTION_KEY` into the extension once, and it decrypts the `⌁ENC:` tokens in-place on every page load. The key lives in `chrome.storage.local` and is only reachable from the extension's [isolated world](https://developer.chrome.com/docs/extensions/develop/concepts/content-scripts#isolated_world) — a hard browser-enforced boundary that prevents page JavaScript (Sabai's frontend, Gmail, anything else) from reading the key or the extension's variables. The extension also requests no network permissions, so the key cannot be exfiltrated even by the extension itself. Because the codebase is tiny and open-source, customers (or a third party) can fully review what it does before installing.
+
 ## Quick Start
 
 1. Copy `.env.example` to `.env`.
