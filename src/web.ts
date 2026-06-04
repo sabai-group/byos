@@ -7,6 +7,7 @@ import { encryptContactName } from "./relay";
 import { fetchRoster, type ContactKind } from "./roster";
 import type { WhatsAppLinkState } from "./whatsapp";
 import { listArchive, openArchiveAttachment, readArchiveMeta } from "./archive";
+import { listProcessing } from "./processing";
 
 function isLikelyQrDataUrl(value: string | null | undefined): boolean {
   if (!value || typeof value !== "string") return false;
@@ -194,6 +195,13 @@ export function createWebApp(options: {
     } catch (error) {
       next(error);
     }
+  });
+
+  /**
+   * Snapshot of inbound offer lists currently being relayed (in-memory only).
+   */
+  app.get("/api/processing", requireSession, (_request, response) => {
+    response.json({ items: listProcessing() });
   });
 
   /**

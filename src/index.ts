@@ -14,6 +14,18 @@ import {
 import { createWebApp } from "./web";
 import { startWhatsAppService } from "./whatsapp";
 import { archiveEmail, archiveWhatsApp, type ArchiveOutcome } from "./archive";
+import { endProcessing, startProcessing } from "./processing";
+
+/** Build a short, single-line preview of a WhatsApp batch for the portal. */
+function whatsappPreview(batch: { text?: string; messages: Array<Record<string, unknown>> }): string {
+  const raw = (batch.text && batch.text.trim()) ||
+    batch.messages
+      .map((m) => (typeof m.text === "string" ? m.text : ""))
+      .find((t) => t && t.trim()) ||
+    "";
+  const oneLine = raw.replace(/\s+/g, " ").trim();
+  return oneLine || "(media only)";
+}
 
 function extractEmailAddress(raw: string | undefined): string | undefined {
   if (!raw) return undefined;
@@ -50,6 +62,12 @@ async function main() {
 
   const whatsappService = await startWhatsAppService({
     onBatch: async (batch) => {
+      const processingToken = startProcessing({
+        channel: "whatsapp",
+        subject: whatsappPreview(batch),
+        from: batch.from,
+      });
+      try {
       const kind = config.whatsappContactKind;
       // Sender gate: only forward messages from known Sabai users for this
       // customer. Unknown senders get a one-line WhatsApp warning and we
@@ -110,6 +128,9 @@ async function main() {
       archiveWhatsApp(batch, waOutcome).catch((err: unknown) =>
         console.error("[byos:archive] whatsapp archive failed (relayed):", err),
       );
+      } finally {
+        endProcessing(processingToken);
+      }
     },
   });
 
@@ -126,6 +147,12 @@ async function main() {
 
   const smtpServer = await startSmtpServer({
     onEmail: async (email) => {
+      const processingToken = startProcessing({
+        channel: "email",
+        subject: (email.subject && email.subject.trim()) || "(no subject)",
+        from: email.from,
+      });
+      try {
       // Sender gate: only accept email from known Sabai users for this
       // customer. Unknown senders get the existing bounce flow with a
       // sender-not-registered reason and the message is not relayed.
@@ -191,6 +218,9 @@ async function main() {
       archiveEmail(email, emailOutcome).catch((err: unknown) =>
         console.error("[byos:archive] email archive failed (relayed):", err),
       );
+      } finally {
+        endProcessing(processingToken);
+      }
     },
   });
 

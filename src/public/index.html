@@ -186,6 +186,100 @@
       .success {
         color: var(--accent);
       }
+
+      .activity-list {
+        list-style: none;
+        padding: 0;
+        margin: 12px 0 0;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .activity-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 10px;
+        background: rgba(15, 23, 42, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 8px;
+        font-size: 0.88rem;
+        min-width: 0;
+      }
+
+      .activity-spinner {
+        flex-shrink: 0;
+        width: 14px;
+        height: 14px;
+        border: 2px solid rgba(255, 255, 255, 0.15);
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: byos-spin 0.8s linear infinite;
+      }
+
+      @keyframes byos-spin { to { transform: rotate(360deg); } }
+
+      .activity-channel {
+        flex-shrink: 0;
+        font-size: 0.68rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: rgba(99, 102, 241, 0.15);
+        color: #818cf8;
+        border: 1px solid rgba(99, 102, 241, 0.35);
+      }
+
+      .activity-channel.channel-whatsapp {
+        background: rgba(34, 197, 94, 0.15);
+        color: var(--accent);
+        border-color: rgba(34, 197, 94, 0.35);
+      }
+
+      .activity-subject {
+        flex: 1;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        color: var(--text);
+      }
+
+      .activity-from {
+        flex-shrink: 0;
+        color: var(--muted);
+        font-size: 0.78rem;
+        max-width: 220px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .activity-empty {
+        color: var(--muted);
+        font-size: 0.88rem;
+        margin: 8px 0 0;
+      }
+
+      .activity-last {
+        margin-top: 14px;
+        padding-top: 12px;
+        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        font-size: 0.88rem;
+        color: var(--muted);
+      }
+
+      .activity-last a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+
+      .activity-last a:hover {
+        text-decoration: underline;
+      }
     </style>
   </head>
   <body>
@@ -223,6 +317,14 @@
           <div id="whatsapp-qr-wrap" class="qr-wrap hidden" aria-hidden="true">
             <img id="whatsapp-qr" class="qr-image" alt="WhatsApp linking QR code" decoding="async" />
           </div>
+        </div>
+
+        <div class="card">
+          <h2>Recent activity</h2>
+          <p>Offer lists currently being relayed by BYOS.</p>
+          <ul id="processing-list" class="activity-list" hidden></ul>
+          <p id="processing-empty" class="activity-empty">No offer lists are processing right now.</p>
+          <div id="activity-last" class="activity-last">Loading latest archived offer list…</div>
         </div>
 
         <div class="card">
@@ -304,6 +406,9 @@
       let whatsappPollTimer = null;
       let whatsappPrev = { ready: false, pairing: false, hadQr: false };
 
+      const ACTIVITY_POLL_MS = 3000;
+      let activityPollTimer = null;
+
       function isLikelyQrDataUrl(value) {
         return (
           typeof value === "string" &&
@@ -353,6 +458,95 @@
         }, WHATSAPP_POLL_MS);
       }
 
+      function escapeHtml(str) {
+        return String(str ?? "")
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;")
+          .replace(/"/g, "&quot;");
+      }
+
+      function formatRelativeTime(iso) {
+        try {
+          const then = new Date(iso).getTime();
+          if (!Number.isFinite(then)) return "";
+          const diff = Math.max(0, Date.now() - then);
+          if (diff < 60_000) return `${Math.round(diff / 1000)}s ago`;
+          if (diff < 3_600_000) return `${Math.round(diff / 60_000)}m ago`;
+          if (diff < 86_400_000) return `${Math.round(diff / 3_600_000)}h ago`;
+          return new Date(iso).toLocaleString();
+        } catch {
+          return "";
+        }
+      }
+
+      function renderProcessing(items) {
+        const list = document.getElementById("processing-list");
+        const empty = document.getElementById("processing-empty");
+        list.innerHTML = "";
+        if (!items || items.length === 0) {
+          list.hidden = true;
+          empty.hidden = false;
+          return;
+        }
+        empty.hidden = true;
+        list.hidden = false;
+        for (const item of items) {
+          const li = document.createElement("li");
+          li.className = "activity-row";
+          const channel = item.channel === "whatsapp" ? "whatsapp" : "email";
+          li.innerHTML =
+            `<span class="activity-spinner" aria-hidden="true"></span>` +
+            `<span class="activity-channel channel-${escapeHtml(channel)}">${escapeHtml(channel)}</span>` +
+            `<span class="activity-subject" title="${escapeHtml(item.subject || "")}">${escapeHtml(item.subject || "(no subject)")}</span>` +
+            `<span class="activity-from" title="${escapeHtml(item.from || "")}">${escapeHtml(item.from || "")}</span>`;
+          list.appendChild(li);
+        }
+      }
+
+      function renderLastArchive(latest) {
+        const el = document.getElementById("activity-last");
+        if (!latest) {
+          el.textContent = "No archived offer lists yet.";
+          return;
+        }
+        const when = formatRelativeTime(latest.receivedAt);
+        const channel = latest.channel === "whatsapp" ? "WhatsApp" : "Email";
+        el.innerHTML =
+          `Last archived: <a href="/archive/${encodeURIComponent(latest.id)}">#${escapeHtml(latest.id)}</a>` +
+          ` &middot; ${escapeHtml(channel)} from ${escapeHtml(latest.from || "(unknown)")}` +
+          (when ? ` &middot; ${escapeHtml(when)}` : "");
+      }
+
+      async function refreshActivity() {
+        try {
+          const [processing, archive] = await Promise.all([
+            api("/api/processing"),
+            api("/api/archive"),
+          ]);
+          renderProcessing(processing.items || []);
+          const items = archive.items || [];
+          renderLastArchive(items.length > 0 ? items[0] : null);
+        } catch {
+          /* ignore transient errors */
+        }
+      }
+
+      function stopActivityPoll() {
+        if (activityPollTimer) {
+          clearInterval(activityPollTimer);
+          activityPollTimer = null;
+        }
+      }
+
+      function startActivityPoll() {
+        stopActivityPoll();
+        activityPollTimer = setInterval(() => {
+          if (appPanel.classList.contains("hidden")) return;
+          refreshActivity();
+        }, ACTIVITY_POLL_MS);
+      }
+
       async function api(path, options = {}) {
         const response = await fetch(path, {
           credentials: "same-origin",
@@ -369,6 +563,7 @@
 
       function showLogin() {
         stopWhatsappPoll();
+        stopActivityPoll();
         whatsappPrev = { ready: false, pairing: false, hadQr: false };
         loginPanel.classList.remove("hidden");
         appPanel.classList.add("hidden");
@@ -378,6 +573,8 @@
         loginPanel.classList.add("hidden");
         appPanel.classList.remove("hidden");
         startWhatsappPoll();
+        startActivityPoll();
+        refreshActivity();
       }
 
       function applyKindCopy() {
