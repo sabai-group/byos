@@ -8,8 +8,8 @@ import { fetchRoster } from "./roster";
 import { startSmtpServer } from "./smtp";
 import {
   fetchUserRoster,
-  isKnownEmailSender,
-  isKnownWhatsAppSender,
+  resolveEmailAttribution,
+  resolveWhatsAppAttribution,
 } from "./userRoster";
 import { createWebApp } from "./web";
 import { startWhatsAppService } from "./whatsapp";
@@ -73,7 +73,8 @@ async function main() {
       // customer. Unknown senders get a one-line WhatsApp warning and we
       // never call fetchRoster / relay for them.
       const userRoster = await fetchUserRoster();
-      if (!isKnownWhatsAppSender(userRoster, batch.from)) {
+      const attributedTo = resolveWhatsAppAttribution(userRoster, batch.from);
+      if (!attributedTo) {
         console.warn(
           `[byos:whatsapp] rejected unknown sender ${batch.from}: not registered as a Sabai user`,
         );
@@ -120,6 +121,7 @@ async function main() {
           byos_received_at: new Date().toISOString(),
         },
         contactMatch: redacted.contactMatch,
+        attributedTo,
       });
       const waOutcome: ArchiveOutcome = {
         senderAccepted: true,
@@ -152,13 +154,14 @@ async function main() {
         subject: (email.subject && email.subject.trim()) || "(no subject)",
         from: email.from,
       });
-      try {
+      try { 
       // Sender gate: only accept email from known Sabai users for this
       // customer. Unknown senders get the existing bounce flow with a
       // sender-not-registered reason and the message is not relayed.
       const senderEmail = extractEmailAddress(email.from);
       const userRoster = await fetchUserRoster();
-      if (!isKnownEmailSender(userRoster, senderEmail)) {
+      const attributedTo = resolveEmailAttribution(userRoster, senderEmail);
+      if (!attributedTo) {
         const reason = "Sender is not registered as a 365 user.";
         console.warn(
           `[byos:smtp] rejected unknown sender from=${email.from} (to=${email.to}): ${reason}`,
@@ -210,6 +213,7 @@ async function main() {
           byos_received_at: new Date().toISOString(),
         },
         contactMatch: redacted.contactMatch,
+        attributedTo,
       });
       const emailOutcome: ArchiveOutcome = {
         senderAccepted: true,

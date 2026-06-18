@@ -40,6 +40,8 @@ export interface RelayedEmailPayload {
   attachments: RelayedAttachment[];
   metadata?: Record<string, unknown>;
   contactMatch: ContactMatch;
+  /** Sabai user id (UUID) the list is attributed to — the forwarder today. */
+  attributedTo: string;
 }
 
 export interface RelayedWhatsAppPayload {
@@ -50,6 +52,7 @@ export interface RelayedWhatsAppPayload {
   attachments: RelayedAttachment[];
   metadata?: Record<string, unknown>;
   contactMatch: ContactMatch;
+  attributedTo: string;
 }
 
 /** Derive a 32-byte key for AES-256-GCM. */
@@ -140,6 +143,7 @@ export async function relayEmail(payload: RelayedEmailPayload): Promise<void> {
     metadata: payload.metadata ?? {},
     contact_match: contactMatchForRelay(payload.contactMatch),
     ...contactIdField(payload.contactMatch),
+    attributed_to: payload.attributedTo,
   });
 }
 
@@ -155,5 +159,6 @@ export async function relayWhatsApp(payload: RelayedWhatsAppPayload): Promise<vo
     metadata: payload.metadata ?? {},
     contact_match: contactMatchForRelay(payload.contactMatch),
     ...contactIdField(payload.contactMatch),
+    attributed_to: payload.attributedTo,
   });
 }

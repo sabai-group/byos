@@ -11,18 +11,22 @@
 import { config } from "./config";
 
 export interface SabaiUser {
+  id: string;
   email: string;
   whatsappNumber: string | null;
 }
 
 interface SabaiUserRow {
+  id: string;
   email: string;
   whatsapp_number: string | null;
 }
 
 export interface UserRoster {
-  emails: Set<string>;
-  whatsappNumbers: Set<string>;
+  /** Lowercased email -> Sabai user id (UUID string). */
+  emailToUserId: Map<string, string>;
+  /** Digits-only WhatsApp id -> Sabai user id (UUID string). */
+  whatsappToUserId: Map<string, string>;
 }
 
 /** Fetch the user roster from Sabai. Throws on non-2xx so callers can log/bounce. */
@@ -37,16 +41,18 @@ export async function fetchUserRoster(): Promise<UserRoster> {
     );
   }
   const data = (await response.json()) as { users?: SabaiUserRow[] };
-  const emails = new Set<string>();
-  const whatsappNumbers = new Set<string>();
+  const emailToUserId = new Map<string, string>();
+  const whatsappToUserId = new Map<string, string>();
   for (const row of data.users ?? []) {
-    if (row.email) emails.add(row.email.toLowerCase());
-    if (row.whatsapp_number) {
+    if (row.email && row.id) {
+      emailToUserId.set(row.email.toLowerCase(), row.id);
+    }
+    if (row.whatsapp_number && row.id) {
       const digits = normalizeWhatsAppId(row.whatsapp_number);
-      if (digits) whatsappNumbers.add(digits);
+      if (digits) whatsappToUserId.set(digits, row.id);
     }
   }
-  return { emails, whatsappNumbers };
+  return { emailToUserId, whatsappToUserId };
 }
 
 /**
@@ -65,16 +71,28 @@ export function normalizeWhatsAppId(value: string | undefined | null): string | 
   return digits.length > 0 ? digits : null;
 }
 
-export function isKnownEmailSender(roster: UserRoster, email: string | undefined | null): boolean {
-  if (!email) return false;
-  return roster.emails.has(email.trim().toLowerCase());
+/**
+ * Resolve the Sabai user id for an email sender. This doubles as the sender
+ * gate: a non-null result means the sender is a known Sabai user (and is the
+ * `attributed_to` id), while `null` means reject.
+ */
+export function resolveEmailAttribution(
+  roster: UserRoster,
+  email: string | undefined | null,
+): string | null {
+  if (!email) return null;
+  return roster.emailToUserId.get(email.trim().toLowerCase()) ?? null;
 }
 
-export function isKnownWhatsAppSender(
+/**
+ * Resolve the Sabai user id for a WhatsApp sender. Non-null means known sender
+ * (the `attributed_to` id); `null` means reject.
+ */
+export function resolveWhatsAppAttribution(
   roster: UserRoster,
   jidOrWaid: string | undefined | null,
-): boolean {
+): string | null {
   const digits = normalizeWhatsAppId(jidOrWaid);
-  if (!digits) return false;
-  return roster.whatsappNumbers.has(digits);
+  if (!digits) return null;
+  return roster.whatsappToUserId.get(digits) ?? null;
 }
