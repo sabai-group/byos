@@ -5,7 +5,7 @@ content (supplier OR buyer, depending on CONTACT_KIND) via the OpenAI API (first
 20 rows per sheet sampled for AI context).
 
 Usage: reads raw xlsx bytes from stdin, writes cleaned xlsx bytes to stdout.
-  - OPENAI_API_KEY, OPENAI_BASE_URL, BYOS_AI_MODEL: AI config (from env)
+  - OPENAI_API_KEY, OPENAI_BASE_URL: AI config (from env)
   - CONTACT_ROSTER: JSON array of {canonicalName, aliases} (from env, set by TS caller)
   - CONTACT_KIND: "supplier" or "buyer" (controls the system prompt only).
   - REDACTION_LABEL: string to substitute for identifying mentions; defaults
@@ -186,7 +186,7 @@ def strip_and_redact(data: bytes) -> bytes:
     # AI-based content redaction
     client = get_openai_client()
     if client:
-        model = os.environ.get("BYOS_AI_MODEL", "gpt-4.1-mini")
+        model = os.environ.get("BYOS_AI_MODEL", "gpt-5-mini")
         kind = get_contact_kind()
         label = get_redaction_label()
         roster = get_contact_roster()

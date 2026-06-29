@@ -2,8 +2,9 @@
 # =============================================================
 #  BYOS STARTUP SCRIPT
 #  Fill in your details in the section below, then copy the
-#  entire script and paste it into the "User Data" field when
-#  creating your DigitalOcean Droplet.
+#  entire script and paste it into your cloud provider's startup
+#  script field (DigitalOcean "User Data" or Azure "Custom data")
+#  when creating your server.
 # =============================================================
 
 # ---- FILL IN YOUR DETAILS HERE ----
@@ -57,7 +58,6 @@ SECRET_ENCRYPTION_KEY=${SECRET_ENCRYPTION_KEY}
 SABAI_BASE_URL=https://sabai365-16c4b4eee4fe.herokuapp.com
 
 OPENAI_API_KEY=${OPENAI_API_KEY}
-BYOS_AI_MODEL=gpt-5-mini
 
 WHATSAPP_HEADLESS=true
 WHATSAPP_DEBUG=false

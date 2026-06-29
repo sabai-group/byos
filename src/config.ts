@@ -36,7 +36,7 @@ export const config = {
   sabaiBaseUrl: process.env.SABAI_BASE_URL ?? "https://sabai365-16c4b4eee4fe.herokuapp.com",
   aiApiKey: process.env.OPENAI_API_KEY ?? "",
   aiBaseUrl: process.env.OPENAI_BASE_URL ?? undefined,
-  aiModel: process.env.BYOS_AI_MODEL ?? "gpt-4.1-mini",
+  aiModel: process.env.BYOS_AI_MODEL ?? "gpt-5-mini",
   /**
    * Email domains that should bypass the regex-based defense-in-depth redaction
    * post-pass. Typically the BYOS customer's own corporate domain(s) plus the

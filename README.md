@@ -65,7 +65,6 @@ The web UI is available on `http://localhost:8787` by default.
 - `SABAI_BASE_URL`: Defaults to `https://sabai365-16c4b4eee4fe.herokuapp.com`.
 - `OPENAI_API_KEY`: AI provider key.
 - `OPENAI_BASE_URL`: Optional override for OpenRouter or another OpenAI-compatible endpoint.
-- `BYOS_AI_MODEL`: Defaults to `gpt-5-mini`.
 - `WHATSAPP_DEBUG`: Enables verbose WhatsApp lifecycle logging and artifact capture.
 - `WHATSAPP_ARTIFACTS_DIR`: Directory for WhatsApp debug logs, screenshots, and saved HTML.
 - `WHATSAPP_USER_AGENT` / `WHATSAPP_LOCALE` / `WHATSAPP_TIMEZONE`: Optional browser identity tuning. The default UA looks like desktop Chrome on Linux (common for WhatsApp Web), while the Docker image runs Debian’s Chromium.
