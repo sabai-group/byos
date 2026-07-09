@@ -36,7 +36,14 @@ export const config = {
   sabaiBaseUrl: process.env.SABAI_BASE_URL ?? "https://sabai365-16c4b4eee4fe.herokuapp.com",
   aiApiKey: process.env.OPENAI_API_KEY ?? "",
   aiBaseUrl: process.env.OPENAI_BASE_URL ?? undefined,
-  aiModel: process.env.BYOS_AI_MODEL ?? "gpt-5-mini",
+  /**
+   * AI model used for contact detection / redaction. Managed by SABAI via the
+   * shipped default so customers stay on a current model without editing config.
+   * `BYOS_AI_MODEL` is deprecated (old deployments pinned it to a mini model);
+   * it is intentionally ignored so those deployments pick up the new default.
+   * `AI_MODEL` remains as an undocumented escape hatch for manual overrides.
+   */
+  aiModel: process.env.AI_MODEL ?? "gpt-5.4",
   /**
    * Email domains that should bypass the regex-based defense-in-depth redaction
    * post-pass. Typically the BYOS customer's own corporate domain(s) plus the
@@ -91,5 +98,11 @@ export function validateConfig(): void {
   }
   if (!config.aiApiKey) {
     console.warn("OPENAI_API_KEY is not set; contact detection will fall back to heuristic matching only.");
+  }
+  if (process.env.BYOS_AI_MODEL) {
+    console.warn(
+      `BYOS_AI_MODEL is deprecated and ignored; the AI model now defaults to ${config.aiModel}. ` +
+        "Remove it from your .env (or set AI_MODEL only if you must override).",
+    );
   }
 }

@@ -186,7 +186,9 @@ def strip_and_redact(data: bytes) -> bytes:
     # AI-based content redaction
     client = get_openai_client()
     if client:
-        model = os.environ.get("BYOS_AI_MODEL", "gpt-5-mini")
+        # BYOS_AI_MODEL is deprecated (old deployments pinned it to a mini model)
+        # and is intentionally ignored so they pick up the current default.
+        model = os.environ.get("AI_MODEL", "gpt-5.4")
         kind = get_contact_kind()
         label = get_redaction_label()
         roster = get_contact_roster()
