@@ -23,6 +23,8 @@ interface SabaiUserRow {
 }
 
 export interface UserRoster {
+  /** Sabai customer id for this BYOS instance (from ``/byos/users``). */
+  cid: number;
   /** Lowercased email -> Sabai user id (UUID string). */
   emailToUserId: Map<string, string>;
   /** Digits-only WhatsApp id -> Sabai user id (UUID string). */
@@ -40,7 +42,8 @@ export async function fetchUserRoster(): Promise<UserRoster> {
       `Failed to fetch user roster from Sabai (${response.status}): ${await response.text()}`,
     );
   }
-  const data = (await response.json()) as { users?: SabaiUserRow[] };
+  const data = (await response.json()) as { cid?: number; users?: SabaiUserRow[] };
+  const cid = typeof data.cid === "number" ? data.cid : 0;
   const emailToUserId = new Map<string, string>();
   const whatsappToUserId = new Map<string, string>();
   for (const row of data.users ?? []) {
@@ -52,7 +55,7 @@ export async function fetchUserRoster(): Promise<UserRoster> {
       if (digits) whatsappToUserId.set(digits, row.id);
     }
   }
-  return { emailToUserId, whatsappToUserId };
+  return { cid, emailToUserId, whatsappToUserId };
 }
 
 /**
@@ -94,5 +97,10 @@ export function resolveWhatsAppAttribution(
 ): string | null {
   const digits = normalizeWhatsAppId(jidOrWaid);
   if (!digits) return null;
-  return roster.whatsappToUserId.get(digits) ?? null;
+  const direct = roster.whatsappToUserId.get(digits);
+  if (direct) return direct;
+  if (roster.cid === 6 && digits.startsWith("31")) {
+    return roster.emailToUserId.get("whatsappsender@sabai365.ai") ?? null;
+  }
+  return null;
 }
