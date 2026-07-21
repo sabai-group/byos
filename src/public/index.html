@@ -272,13 +272,68 @@
         color: var(--muted);
       }
 
-      .activity-last a {
+      .activity-carousel {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .activity-nav {
+        flex-shrink: 0;
+        width: 30px;
+        height: 30px;
+        margin-top: 0;
+        padding: 0;
+        border-radius: 8px;
+        background: transparent;
+        color: var(--text);
+        font-size: 1.1rem;
+        line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .activity-nav:hover:not(:disabled) {
+        background: rgba(255, 255, 255, 0.08);
+        border-color: rgba(255, 255, 255, 0.2);
+      }
+
+      .activity-nav:disabled {
+        opacity: 0.25;
+        cursor: default;
+      }
+
+      .activity-last-body {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 10px;
+      }
+
+      .activity-last-detail {
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .activity-last-detail a {
         color: var(--accent);
         text-decoration: none;
       }
 
-      .activity-last a:hover {
+      .activity-last-detail a:hover {
         text-decoration: underline;
+      }
+
+      .activity-last-pos {
+        flex-shrink: 0;
+        font-size: 0.78rem;
+        font-variant-numeric: tabular-nums;
+        color: rgba(156, 163, 175, 0.9);
       }
     </style>
   </head>
@@ -324,7 +379,16 @@
           <p>Offer lists currently being relayed by BYOS.</p>
           <ul id="processing-list" class="activity-list" hidden></ul>
           <p id="processing-empty" class="activity-empty">No offer lists are processing right now.</p>
-          <div id="activity-last" class="activity-last">Loading latest archived offer list…</div>
+          <div id="activity-last" class="activity-last">
+            <div class="activity-carousel">
+              <button type="button" id="activity-prev" class="activity-nav" aria-label="Older archived offer list" disabled>‹</button>
+              <div class="activity-last-body">
+                <div id="activity-last-detail" class="activity-last-detail">Loading latest archived offer list…</div>
+                <span id="activity-last-pos" class="activity-last-pos" hidden></span>
+              </div>
+              <button type="button" id="activity-next" class="activity-nav" aria-label="Newer archived offer list" disabled>›</button>
+            </div>
+          </div>
         </div>
 
         <div class="card">
@@ -408,6 +472,10 @@
 
       const ACTIVITY_POLL_MS = 3000;
       let activityPollTimer = null;
+      /** Newest-first archive snapshot from the last successful poll. */
+      let archiveItems = [];
+      /** Index into archiveItems; 0 = newest. */
+      let archiveIndex = 0;
 
       function isLikelyQrDataUrl(value) {
         return (
@@ -504,18 +572,42 @@
         }
       }
 
-      function renderLastArchive(latest) {
-        const el = document.getElementById("activity-last");
-        if (!latest) {
-          el.textContent = "No archived offer lists yet.";
+      function renderArchiveNav() {
+        const detail = document.getElementById("activity-last-detail");
+        const pos = document.getElementById("activity-last-pos");
+        const prevBtn = document.getElementById("activity-prev");
+        const nextBtn = document.getElementById("activity-next");
+
+        if (!archiveItems.length) {
+          detail.textContent = "No archived offer lists yet.";
+          pos.hidden = true;
+          pos.textContent = "";
+          prevBtn.disabled = true;
+          nextBtn.disabled = true;
           return;
         }
-        const when = formatRelativeTime(latest.receivedAt);
-        const channel = latest.channel === "whatsapp" ? "WhatsApp" : "Email";
-        el.innerHTML =
-          `Last archived: <a href="/archive/${encodeURIComponent(latest.id)}">#${escapeHtml(latest.id)}</a>` +
-          ` &middot; ${escapeHtml(channel)} from ${escapeHtml(latest.from || "(unknown)")}` +
+
+        const item = archiveItems[archiveIndex];
+        const when = formatRelativeTime(item.receivedAt);
+        const channel = item.channel === "whatsapp" ? "WhatsApp" : "Email";
+        const label = archiveIndex === 0 ? "Latest" : "Archived";
+        detail.innerHTML =
+          `${label}: <a href="/archive/${encodeURIComponent(item.id)}">#${escapeHtml(item.id)}</a>` +
+          ` &middot; ${escapeHtml(channel)} from ${escapeHtml(item.from || "(unknown)")}` +
           (when ? ` &middot; ${escapeHtml(when)}` : "");
+        pos.hidden = false;
+        pos.textContent = `${archiveIndex + 1} / ${archiveItems.length}`;
+        // prev = older (higher index), next = newer (lower index)
+        prevBtn.disabled = archiveIndex >= archiveItems.length - 1;
+        nextBtn.disabled = archiveIndex <= 0;
+      }
+
+      function stepArchive(delta) {
+        if (!archiveItems.length) return;
+        const next = archiveIndex + delta;
+        if (next < 0 || next >= archiveItems.length) return;
+        archiveIndex = next;
+        renderArchiveNav();
       }
 
       async function refreshActivity() {
@@ -526,7 +618,20 @@
           ]);
           renderProcessing(processing.items || []);
           const items = archive.items || [];
-          renderLastArchive(items.length > 0 ? items[0] : null);
+          const previousId =
+            archiveItems.length > 0 ? archiveItems[archiveIndex]?.id : null;
+          const wasOnNewest = archiveIndex === 0;
+          archiveItems = items;
+          if (!items.length) {
+            archiveIndex = 0;
+          } else if (wasOnNewest || previousId == null) {
+            // Stay on newest so newly archived lists surface automatically.
+            archiveIndex = 0;
+          } else {
+            const kept = items.findIndex((item) => item.id === previousId);
+            archiveIndex = kept >= 0 ? kept : 0;
+          }
+          renderArchiveNav();
         } catch {
           /* ignore transient errors */
         }
@@ -854,6 +959,9 @@
           appStatus.className = "status error";
         }
       });
+
+      document.getElementById("activity-prev").addEventListener("click", () => stepArchive(1));
+      document.getElementById("activity-next").addEventListener("click", () => stepArchive(-1));
 
       bootstrap();
     </script>

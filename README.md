@@ -40,7 +40,7 @@ You paste your `SECRET_ENCRYPTION_KEY` into the extension once, and it decrypts 
 docker compose up --build
 ```
 
-**Quick and dirty local dev** (plain `docker build` + `docker run` from this directory, with a named volume for WhatsApp auth and bind mounts for runtime + roster):
+**Local Dev** (plain `docker build` + `docker run` from this directory, with a named volume for WhatsApp auth and bind mounts for runtime + roster):
 
 ```bash
 docker build -t byos . && docker run --rm \
