@@ -93,8 +93,8 @@ async function main() {
         messages: batch.messages,
       });
       if (!redacted.matched) {
-        // BYOS couldn't identify the contact — warn the sender directly via
-        // the same WhatsApp channel (no LID -> phone resolution needed).
+        // Recognized Sabai user, but redaction couldn't identify the contact —
+        // tell them so they can add the supplier/buyer and resend.
         console.warn(
           `[byos:whatsapp] unmatched ${kind} from ${batch.from}: ${redacted.reason}`,
         );
@@ -122,6 +122,10 @@ async function main() {
         contactMatch: redacted.contactMatch,
         attributedTo,
       });
+      await whatsappService.sendSenderWarning(
+        batch.from,
+        "Received — your redacted message was forwarded to 365 and is currently being ingested",
+      );
       const waOutcome: ArchiveOutcome = {
         senderAccepted: true,
         contactMatch: { kind: redacted.contactMatch.kind, confidence: redacted.contactMatch.confidence },
