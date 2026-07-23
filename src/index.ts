@@ -75,12 +75,11 @@ async function main() {
       const userRoster = await fetchUserRoster();
       const attributedTo = resolveWhatsAppAttribution(userRoster, batch.from);
       if (!attributedTo) {
+        // Ghost unknown senders: random people who message the linked number
+        // (and group chats, whose JID never matches a user) must NOT get an
+        // automated reply — we silently drop the message and only archive it.
         console.warn(
-          `[byos:whatsapp] rejected unknown sender ${batch.from}: not registered as a Sabai user`,
-        );
-        await whatsappService.sendSenderWarning(
-          batch.from,
-          "BYOS only relays messages from registered Sabai users. Ask your admin to add your WhatsApp number to your Sabai account.",
+          `[byos:whatsapp] Ignored unknown sender ${batch.from}: not registered as a Sabai user (no reply sent)`,
         );
         archiveWhatsApp(batch, { senderAccepted: false, rejectReason: "sender not registered as a Sabai user" }).catch((err: unknown) =>
           console.error("[byos:archive] whatsapp archive failed (sender rejected):", err),

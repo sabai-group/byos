@@ -3,3 +3,4 @@ dist
 .env
 tsconfig.tsbuildinfo
 __pycache__
+data/runtime
