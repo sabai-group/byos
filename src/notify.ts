@@ -1,13 +1,9 @@
 /**
- * Thin client for Sabai's /byos/notify-sender-bounce endpoint.
+ * Thin clients for Sabai's /byos/notify-* endpoints.
  *
- * Invoked when BYOS receives a message on requests@/offers@ but cannot
- * identify the buyer/supplier it's referring to. Sabai emails the original
- * sender a short explanation with a pointer to the BYOS portal.
- *
- * Only the email channel is proxied through the backend; WhatsApp sender
- * warnings are delivered by BYOS itself via the already-authenticated
- * whatsapp-web.js client (no phone-number resolution required).
+ * Email delivery always goes through the backend (SendGrid lives there).
+ * WhatsApp sender warnings are delivered by BYOS itself via the already-
+ * authenticated whatsapp-web.js client (no phone-number resolution required).
  */
 import { config } from "./config";
 import type { ContactKind } from "./roster";
@@ -60,5 +56,55 @@ export async function notifySenderBounceEmail(req: SenderBounceEmailRequest): Pr
     }
   } catch (error) {
     console.warn("[byos:notify] notify-sender-bounce threw:", error);
+  }
+}
+
+export interface WhatsAppUnpairedNotifyRequest {
+  status: string;
+  lastError: string | null;
+}
+
+/**
+ * Ask Sabai to email ``customer.whatsapp_unpaired_alert_recipients`` that this
+ * Droplet's WhatsApp session is unpaired. Best-effort; failures are logged
+ * only. Returns true when Sabai accepted the notify (HTTP 2xx and not
+ * ``status=skipped``), so the caller can advance its once-per-day cadence.
+ */
+export async function notifyWhatsAppUnpaired(
+  req: WhatsAppUnpairedNotifyRequest,
+): Promise<boolean> {
+  const body = JSON.stringify({
+    status: req.status,
+    last_error: req.lastError,
+  });
+  try {
+    const response = await fetch(`${config.sabaiBaseUrl}/byos/notify-whatsapp-unpaired`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-BYOS-API-Key": config.sabaiApiKey,
+      },
+      body,
+    });
+    const text = await response.text().catch(() => "");
+    if (!response.ok) {
+      console.warn(
+        `[byos:notify] notify-whatsapp-unpaired failed (${response.status}): ${text}`,
+      );
+      return false;
+    }
+    try {
+      const parsed = JSON.parse(text) as { status?: string };
+      if (parsed.status === "skipped") {
+        console.log("[byos:notify] notify-whatsapp-unpaired skipped (no recipients configured)");
+        return false;
+      }
+    } catch {
+      // Non-JSON 2xx still counts as delivered.
+    }
+    return true;
+  } catch (error) {
+    console.warn("[byos:notify] notify-whatsapp-unpaired threw:", error);
+    return false;
   }
 }

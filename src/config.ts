@@ -86,7 +86,7 @@ export const config = {
   whatsappViewportWidth: parseIntEnv("WHATSAPP_VIEWPORT_WIDTH", 1366),
   whatsappViewportHeight: parseIntEnv("WHATSAPP_VIEWPORT_HEIGHT", 768),
   puppeteerExecutablePath: process.env.PUPPETEER_EXECUTABLE_PATH ?? "/usr/bin/byos-browser",
-  sessionMaxAgeSeconds: parseIntEnv("BYOS_SESSION_MAX_AGE_SECONDS", 60 * 60 * 12),
+  sessionMaxAgeSeconds: parseIntEnv("BYOS_SESSION_MAX_AGE_SECONDS", 60 * 60 * 24 * 7),
 };
 
 export function validateConfig(): void {

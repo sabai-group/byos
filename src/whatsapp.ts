@@ -8,6 +8,11 @@ import { Client, LocalAuth, type Message } from "whatsapp-web.js";
 import { config } from "./config";
 import { openLidCache, type LidCache } from "./lidCache";
 import type { RelayedAttachment } from "./relay";
+import {
+  NEVER_SENT_ALERT_MS,
+  loadWhatsAppRuntimeState,
+  updateWhatsAppRuntimeState,
+} from "./whatsappRuntimeState";
 
 const execFileAsync = promisify(execFile);
 
@@ -219,6 +224,12 @@ interface WhatsAppBatch {
 export interface WhatsAppService {
   forceQrForWeb: () => Promise<WhatsAppLinkState>;
   getLinkState: () => WhatsAppLinkState;
+  /**
+   * True when WhatsApp is not ready, not mid-pairing, and not mid Force-New-QR
+   * reset — i.e. needs a human to scan a QR (or is still starting up with no
+   * session). Used by the daily unpaired-alert loop.
+   */
+  isUnpaired: () => boolean;
   shutdown: () => Promise<void>;
   /**
    * Send a short warning text back to `senderJid` over the WhatsApp client.
@@ -260,6 +271,13 @@ export interface WhatsAppLinkState {
 
 export async function startWhatsAppService(options: {
   onBatch: (batch: { from: string; to?: string; text: string; messages: Array<Record<string, unknown>>; attachments: RelayedAttachment[]; metadata: Record<string, unknown> }) => Promise<void>;
+  /**
+   * Fired when the session becomes unpaired in a way that should page ops
+   * immediately (`disconnected`; `auth_failure` on LocalAuth restore failure;
+   * or `qr` after a prior `ready`). Skipped during intentional Force New QR.
+   * Best-effort; callers must not throw.
+   */
+  onBecameUnpaired?: (info: { status: string; lastError: string | null }) => void;
 }): Promise<WhatsAppService> {
   const batches = new Map<string, WhatsAppBatch>();
   const pendingQrWaiters = new Set<(state: WhatsAppLinkState) => void>();
@@ -272,9 +290,23 @@ export async function startWhatsAppService(options: {
   let client: Client | null = null;
   let latestQrDataUrl: string | null = null;
   let isReady = false;
+  /**
+   * True after at least one successful `ready` on this volume (loaded from disk
+   * at boot, written on each `ready`). Gates QR-based unpaired alerts so
+   * first-time pairing does not page, but re-link after crash/LOGOUT does.
+   */
+  let everReady = false;
   /** True after `authenticated` until `ready` (or reset by qr / failure / disconnect). */
   let pairingInProgress = false;
   let forceResetInProgress = false;
+  /**
+   * True while we tear down + relaunch after a remote disconnect/LOGOUT.
+   * WWebJS's own post-logout `inject()` races and can crash the process with
+   * `onQRChangedEvent already exists` — we close the browser first and bring
+   * up a clean client for a new QR instead.
+   * @see https://github.com/wwebjs/whatsapp-web.js/issues/5682
+   */
+  let disconnectRecoveryInProgress = false;
   let status = "initializing";
   let lastEvent: string | null = null;
   let lastEventAt: string | null = null;
@@ -439,6 +471,61 @@ export async function startWhatsAppService(options: {
     };
   }
 
+  function isUnpaired(): boolean {
+    return !isReady && !pairingInProgress && !forceResetInProgress && !disconnectRecoveryInProgress;
+  }
+
+  function emitBecameUnpaired(): void {
+    if (forceResetInProgress || disconnectRecoveryInProgress) return;
+    try {
+      options.onBecameUnpaired?.({ status, lastError });
+    } catch (error) {
+      console.warn("[byos:whatsapp] onBecameUnpaired handler threw:", error);
+    }
+  }
+
+  /**
+   * After phone LOGOUT (or other disconnect), WWebJS tries to reinject into the
+   * same Puppeteer page. That often throws an unhandled
+   * `onQRChangedEvent already exists` and takes down the whole BYOS process.
+   * Close the browser immediately, wipe LocalAuth on LOGOUT, and relaunch so
+   * the portal can show a fresh QR without crashing.
+   *
+   * Upstream: exposeFunctionIfAbsent only checks `window[name]` after navigation,
+   * but Puppeteer's CDP binding for that name still exists — classic crash on
+   * framenavigated → inject() after LOGOUT. Community workaround is destroy +
+   * re-init (same pattern suggested on the issue).
+   * @see https://github.com/wwebjs/whatsapp-web.js/issues/5682
+   */
+  async function recoverAfterDisconnect(reason: string): Promise<void> {
+    if (forceResetInProgress || disconnectRecoveryInProgress) {
+      return;
+    }
+    disconnectRecoveryInProgress = true;
+    try {
+      markEvent("disconnect_recovery_started", { reason });
+      // Do not call client.logout() — the session is already gone remotely, and
+      // logout() would navigate/reinject on the dying page.
+      await destroyCurrentClient({ logout: false });
+      const reasonUpper = String(reason ?? "").toUpperCase();
+      if (reasonUpper === "LOGOUT" || reasonUpper.includes("LOGOUT")) {
+        const wipe = await wipeWhatsAppAuthRoot(config.whatsappAuthPath);
+        markEvent("disconnect_recovery_auth_wiped", {
+          wipeOk: wipe.ok,
+          error: wipe.error ?? null,
+        });
+      }
+      await initializeClient();
+      markEvent("disconnect_recovery_finished", { status, lastError });
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+      status = "launch_failed";
+      markEvent("disconnect_recovery_failed", { error: lastError });
+    } finally {
+      disconnectRecoveryInProgress = false;
+    }
+  }
+
   function resolvePendingQrWaiters(): void {
     const state = getLinkState();
     for (const resolve of pendingQrWaiters) {
@@ -552,12 +639,17 @@ export async function startWhatsAppService(options: {
 
   function attachClientListeners(activeClient: Client): void {
     activeClient.on("qr", async (qr: string) => {
+      const hadBeenReady = everReady;
       isReady = false;
       pairingInProgress = false;
       status = "qr_ready";
       latestQrDataUrl = await QRCode.toDataURL(qr, { errorCorrectionLevel: "M" });
       lastError = null;
       markEvent("qr", { qrLength: qr.length });
+      // Cold-start QR is expected; only page if we previously had a live session.
+      if (hadBeenReady) {
+        emitBecameUnpaired();
+      }
     });
 
     activeClient.on("authenticated", () => {
@@ -571,11 +663,20 @@ export async function startWhatsAppService(options: {
 
     activeClient.on("ready", () => {
       isReady = true;
+      everReady = true;
       pairingInProgress = false;
       status = "ready";
       latestQrDataUrl = null;
       lastError = null;
       markEvent("ready");
+      // Persist link history and clear unpaired-alert cooldown immediately so a
+      // quick re-logout (before the hourly tick) can page again.
+      void updateWhatsAppRuntimeState({
+        hadReadySession: true,
+        lastAlertSentAtMs: NEVER_SENT_ALERT_MS,
+      }).catch((error) =>
+        console.warn("[byos:whatsapp] failed to persist ready runtime state:", error),
+      );
     });
 
     activeClient.on("change_state", (state: string) => {
@@ -595,10 +696,21 @@ export async function startWhatsAppService(options: {
       latestQrDataUrl = null;
       lastError = reason || "Disconnected";
       markEvent("disconnected", { reason });
-      void captureBrowserArtifacts("disconnected");
+      // Page is often already tearing down on LOGOUT (0-width viewport) — skip
+      // screenshot noise; recovery below closes the browser immediately.
+      const reasonUpper = String(reason ?? "").toUpperCase();
+      if (reasonUpper !== "LOGOUT" && !reasonUpper.includes("LOGOUT")) {
+        void captureBrowserArtifacts("disconnected");
+      }
+      emitBecameUnpaired();
+      void recoverAfterDisconnect(reason);
     });
 
     activeClient.on("auth_failure", (message: string) => {
+      // WWebJS emits this when restoring an existing LocalAuth session fails —
+      // not when a live QR pairing attempt goes wrong (that just refreshes `qr`).
+      // So we alert without an `everReady` gate: it can fire on cold boot before
+      // this process ever reached `ready`, and that is still worth paging.
       isReady = false;
       pairingInProgress = false;
       status = "auth_failure";
@@ -606,6 +718,7 @@ export async function startWhatsAppService(options: {
       lastError = message || "Authentication failed";
       markEvent("auth_failure", { message });
       void captureBrowserArtifacts("auth_failure");
+      emitBecameUnpaired();
     });
 
     activeClient.on("message", async (message: Message) => {
@@ -890,6 +1003,11 @@ export async function startWhatsAppService(options: {
     });
   }
 
+  everReady = (await loadWhatsAppRuntimeState()).hadReadySession;
+  if (everReady) {
+    markEvent("had_ready_session_loaded", {});
+  }
+
   const authStoreBeforeLaunch = await inspectAuthStore(config.whatsappAuthPath);
   await initializeClient();
   await confirmStartupRestore(authStoreBeforeLaunch);
@@ -922,6 +1040,7 @@ export async function startWhatsAppService(options: {
       return waitForQrState();
     },
     getLinkState,
+    isUnpaired,
     async sendSenderWarning(senderJid: string, text: string) {
       if (!client || !isReady) {
         console.warn(

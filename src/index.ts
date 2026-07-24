@@ -13,6 +13,10 @@ import {
 } from "./userRoster";
 import { createWebApp } from "./web";
 import { startWhatsAppService } from "./whatsapp";
+import {
+  notifyWhatsAppUnpairedNow,
+  startWhatsAppUnpairedAlertLoop,
+} from "./whatsappUnpairedAlert";
 import { archiveEmail, archiveWhatsApp, type ArchiveOutcome } from "./archive";
 import { endProcessing, startProcessing } from "./processing";
 
@@ -61,6 +65,9 @@ async function main() {
   let shuttingDown = false;
 
   const whatsappService = await startWhatsAppService({
+    onBecameUnpaired: (info) => {
+      void notifyWhatsAppUnpairedNow(info);
+    },
     onBatch: async (batch) => {
       const processingToken = startProcessing({
         channel: "whatsapp",
@@ -138,6 +145,8 @@ async function main() {
       }
     },
   });
+
+  const unpairedAlertLoop = startWhatsAppUnpairedAlertLoop(whatsappService);
 
   const webApp = createWebApp({
     getWhatsAppLinkState: () => whatsappService.getLinkState(),
@@ -237,6 +246,7 @@ async function main() {
     }
     shuttingDown = true;
     console.log("Shutting down BYOS services...");
+    unpairedAlertLoop.stop();
     await whatsappService.shutdown().catch((error) => console.error("WhatsApp shutdown failed", error));
     await new Promise<void>((resolve, reject) =>
       smtpServer.close((error: Error | null | undefined) => (error ? reject(error) : resolve())),
@@ -249,6 +259,22 @@ async function main() {
 
   process.once("SIGINT", () => void shutdown());
   process.once("SIGTERM", () => void shutdown());
+
+  // Safety net: whatsapp-web.js's post-LOGOUT framenavigated → inject() can
+  // still reject with "onQRChangedEvent already exists" if it races our
+  // destroy. Do not let that take down SMTP/web.
+  // https://github.com/wwebjs/whatsapp-web.js/issues/5682
+  process.on("unhandledRejection", (reason) => {
+    const msg = reason instanceof Error ? reason.message : String(reason);
+    if (
+      msg.includes("already exists") &&
+      (msg.includes("onQRChangedEvent") || msg.includes("page binding"))
+    ) {
+      console.warn("[byos] swallowed WWebJS post-logout reinject rejection:", msg);
+      return;
+    }
+    console.error("[byos] unhandledRejection:", reason);
+  });
 }
 
 main().catch((error) => {

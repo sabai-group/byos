@@ -80,6 +80,7 @@ creates them on Sabai with encrypted names.
 ## WhatsApp Linking
 
 - The web UI shows linking status and the QR when one is active; use **Force New QR** to wipe the session and get a new code. Debug artifacts appear when `WHATSAPP_DEBUG=true`.
+- On `disconnected` / `auth_failure` / post-ready `qr`, BYOS immediately POSTs `/byos/notify-whatsapp-unpaired` (then at most once per day while still unpaired). Sabai emails `customer.whatsapp_unpaired_alert_recipients`. Mute a tenant by setting that column to null/`[]` on the Sabai side of things.
 
 ## WhatsApp session persistence (Docker)
 
