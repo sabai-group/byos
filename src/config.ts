@@ -33,7 +33,7 @@ export const config = {
    * Must not be configured on Sabai — only BYOS (and optional downstream decryptors) should have it.
    */
   contactEncryptionKey: process.env.SECRET_ENCRYPTION_KEY ?? "",
-  sabaiBaseUrl: process.env.SABAI_BASE_URL ?? "https://sabai365-16c4b4eee4fe.herokuapp.com",
+  sabaiBaseUrl: process.env.SABAI_BASE_URL ?? "https://api.sabai365.ai",
   aiApiKey: process.env.OPENAI_API_KEY ?? "",
   aiBaseUrl: process.env.OPENAI_BASE_URL ?? undefined,
   /**

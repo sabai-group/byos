@@ -19,7 +19,7 @@ It runs three things in one container:
 - Redacts file names and images from spreadsheet extensions.
 - Encrypts the canonical supplier name with a BYOS-only key so SABAI ingest never sees plaintext identities (TLS is separate).
 - Sends `SABAI_API_KEY` in `X-BYOS-API-Key` so SABAI can authenticate the BYOS client (HTTPS).
-- Sends the sanitized payload to SABAI at `https://sabai365-16c4b4eee4fe.herokuapp.com` by default.
+- Sends the sanitized payload to SABAI at `https://api.sabai365.ai` by default.
 
 ## Viewing Encrypted Names in Sabai365
 
@@ -62,7 +62,7 @@ The web UI is available on `http://localhost:8787` by default.
 - `BYOS_ADMIN_PASSWORD`: Web UI password. Defaults to `365`.
 - `SABAI_API_KEY`: Required. Customer-specific key from the Sabai `customer` table (`X-BYOS-API-Key` header). Also used to fetch the supplier roster.
 - `SECRET_ENCRYPTION_KEY`: Required on BYOS. Any strong string; BYOS SHA-256-hashes it for AES-256-GCM. Never share this with SABAI.
-- `SABAI_BASE_URL`: Defaults to `https://sabai365-16c4b4eee4fe.herokuapp.com`.
+- `SABAI_BASE_URL`: Defaults to `https://api.sabai365.ai`.
 - `OPENAI_API_KEY`: AI provider key.
 - `OPENAI_BASE_URL`: Optional override for OpenRouter or another OpenAI-compatible endpoint.
 - `WHATSAPP_DEBUG`: Enables verbose WhatsApp lifecycle logging and artifact capture.
