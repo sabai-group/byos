@@ -61,7 +61,8 @@ The web UI is available on `http://localhost:8787` by default.
 
 - `BYOS_ADMIN_PASSWORD`: Web UI password. Defaults to `365`.
 - `SABAI_API_KEY`: Required. Customer-specific key from the Sabai `customer` table (`X-BYOS-API-Key` header). Also used to fetch the supplier roster.
-- `SECRET_ENCRYPTION_KEY`: Required on BYOS. Any strong string; BYOS SHA-256-hashes it for AES-256-GCM. Never share this with SABAI.
+- `SECRET_ENCRYPTION_KEY`: Required on customer BYOS servers. Any strong string; BYOS SHA-256-hashes it for AES-256-GCM. Never share this with SABAI.
+- `BYOS_DISABLE_ENCRYPTION`: Internal Sabai server only. When `true`, contact names are stored in plaintext and `SECRET_ENCRYPTION_KEY` is not required. Leave unset on customer deployments.
 - `SABAI_BASE_URL`: Defaults to `https://api.sabai365.ai`.
 - `OPENAI_API_KEY`: AI provider key.
 - `OPENAI_BASE_URL`: Optional override for OpenRouter or another OpenAI-compatible endpoint.

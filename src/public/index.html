@@ -341,7 +341,7 @@
     <main>
       <section id="login-panel" class="panel hidden">
         <h1>Encrypted BYOS Portal <span class="version-tag">v1.1</span></h1>
-        <p>Enter the deployment password to manage the encrypted supplier and buyer rosters.</p>
+        <p id="login-blurb">Enter the deployment password to manage the encrypted supplier and buyer rosters.</p>
         <form id="login-form">
           <label for="password">Password</label>
           <input id="password" type="password" autocomplete="current-password" />
@@ -354,7 +354,7 @@
         <div class="row">
           <div>
             <h1>Encrypted BYOS Portal <span class="version-tag">v1.1</span></h1>
-            <p>Suppliers and buyers are stored encrypted in Sabai. Names are decrypted locally for display.</p>
+            <p id="app-blurb">Suppliers and buyers are stored encrypted in Sabai. Names are decrypted locally for display.</p>
           </div>
           <div style="text-align:right">
             <button id="logout-button" class="secondary">Log Out</button>
@@ -682,6 +682,18 @@
         refreshActivity();
       }
 
+      let encryptionDisabled = false;
+
+      function applyEncryptionCopy() {
+        if (!encryptionDisabled) return;
+        const loginBlurb = document.getElementById("login-blurb");
+        const appBlurb = document.getElementById("app-blurb");
+        const addDescription = document.getElementById("contact-add-description");
+        if (loginBlurb) loginBlurb.textContent = "Enter the deployment password to manage suppliers, buyers, and WhatsApp.";
+        if (appBlurb) appBlurb.textContent = "Supplier and buyer names on this server are stored in plaintext.";
+        if (addDescription) addDescription.textContent = "The name is stored in plaintext.";
+      }
+
       function applyKindCopy() {
         const copy = KIND_COPY[currentKind];
         contactAddHeading.textContent = `Add ${copy.title}`;
@@ -689,6 +701,7 @@
         contactListHeading.textContent = `Current ${copy.titlePlural}`;
         addContactButton.textContent = `Add ${copy.title}`;
         newContactInput.placeholder = copy.placeholder;
+        applyEncryptionCopy();
       }
 
       async function deleteContact(id, name) {
@@ -840,6 +853,8 @@
         try {
           const session = await api("/api/session", { headers: {} });
           authenticated = Boolean(session.authenticated);
+          encryptionDisabled = Boolean(session.encryptionDisabled);
+          applyEncryptionCopy();
         } catch (error) {
           console.error("Session check failed:", error);
         }

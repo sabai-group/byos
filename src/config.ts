@@ -33,6 +33,12 @@ export const config = {
    * Must not be configured on Sabai — only BYOS (and optional downstream decryptors) should have it.
    */
   contactEncryptionKey: process.env.SECRET_ENCRYPTION_KEY ?? "",
+  /**
+   * Internal Sabai deployment only. When true, contact names are stored in
+   * plaintext (`is_encrypted: false`) and SECRET_ENCRYPTION_KEY is not required.
+   * Customer servers must leave this unset.
+   */
+  disableContactEncryption: parseBoolEnv("BYOS_DISABLE_ENCRYPTION", false),
   sabaiBaseUrl: process.env.SABAI_BASE_URL ?? "https://api.sabai365.ai",
   aiApiKey: process.env.OPENAI_API_KEY ?? "",
   aiBaseUrl: process.env.OPENAI_BASE_URL ?? undefined,
@@ -93,8 +99,11 @@ export function validateConfig(): void {
   if (!config.sabaiApiKey) {
     throw new Error("SABAI_API_KEY is required (must match a Sabai-accepted relay key)");
   }
-  if (!config.contactEncryptionKey) {
+  if (!config.disableContactEncryption && !config.contactEncryptionKey) {
     throw new Error("SECRET_ENCRYPTION_KEY is required to encrypt contact identity for Sabai ingest");
+  }
+  if (config.disableContactEncryption) {
+    console.warn("[byos] BYOS_DISABLE_ENCRYPTION is set; contact names will be stored in plaintext.");
   }
   if (!config.aiApiKey) {
     console.warn("OPENAI_API_KEY is not set; contact detection will fall back to heuristic matching only.");

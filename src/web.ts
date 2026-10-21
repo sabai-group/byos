@@ -50,7 +50,8 @@ function rosterPath(kind: ContactKind): string {
 
 async function postContactToSabai(
   kind: ContactKind,
-  encryptedName: string,
+  name: string,
+  isEncrypted: boolean,
 ): Promise<unknown> {
   const response = await fetch(`${config.sabaiBaseUrl}${rosterPath(kind)}`, {
     method: "POST",
@@ -58,7 +59,7 @@ async function postContactToSabai(
       "Content-Type": "application/json",
       "X-BYOS-API-Key": config.sabaiApiKey,
     },
-    body: JSON.stringify({ name: encryptedName, is_encrypted: true }),
+    body: JSON.stringify({ name, is_encrypted: isEncrypted }),
   });
   if (!response.ok) {
     const text = await response.text();
@@ -108,7 +109,10 @@ export function createWebApp(options: {
   });
 
   app.get("/api/session", (request, response) => {
-    response.json({ authenticated: hasValidSession(request) });
+    response.json({
+      authenticated: hasValidSession(request),
+      encryptionDisabled: config.disableContactEncryption,
+    });
   });
 
   app.post("/api/login", (request, response) => {
@@ -146,8 +150,9 @@ export function createWebApp(options: {
   });
 
   /**
-   * Unified contact endpoint; body: `{ kind, name }`. BYOS encrypts the name
-   * locally before shipping to Sabai so plaintext never touches the DB.
+   * Unified contact endpoint; body: `{ kind, name }`. Customer deployments
+   * encrypt the name locally before shipping to Sabai. The internal server
+   * (`BYOS_DISABLE_ENCRYPTION`) stores the plaintext name instead.
    */
   app.post("/api/contacts", requireSession, async (request, response, next) => {
     try {
@@ -157,8 +162,10 @@ export function createWebApp(options: {
         response.status(400).json({ error: "name is required" });
         return;
       }
-      const encrypted = encryptContactName(name.trim());
-      const result = await postContactToSabai(kind, encrypted);
+      const trimmed = name.trim();
+      const isEncrypted = !config.disableContactEncryption;
+      const storedName = isEncrypted ? encryptContactName(trimmed) : trimmed;
+      const result = await postContactToSabai(kind, storedName, isEncrypted);
       response.json(result);
     } catch (error) {
       next(error);
