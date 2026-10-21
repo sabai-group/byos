@@ -123,7 +123,6 @@ async function main() {
         attachments: cleanedAttachments,
         metadata: {
           ...batch.metadata,
-          waid: "redacted",
           byos_received_at: new Date().toISOString(),
         },
         contactMatch: redacted.contactMatch,

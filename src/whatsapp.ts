@@ -595,7 +595,7 @@ export async function startWhatsAppService(options: {
       messages: batch.messages,
       attachments: batch.attachments,
       metadata: {
-        waid: batch.from.replace(/\D/g, "") || "redacted",
+        waid: batch.from.replace(/\D/g, ""),
         unresolvedSender: batch.unresolvedSender,
       },
     });
