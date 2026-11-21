@@ -322,8 +322,10 @@ function aiSystemPrompt(kind: ContactKind): string {
 
   return (
     identificationGuidance
-    + `canonicalName must exactly match one ${counterparty} from the roster or be null when the `
-    + `${counterparty} is ambiguous or unknown — do NOT guess.\n\n`
+    + `canonicalName must exactly match one ${counterparty} from the roster. An abbreviation or short label `
+    + `counts when it most likely refers to one roster entry (for example "Acme offer" or `
+    + `"Supplier name - Acme" → "Acme Beverages Ltd."). Return null only when no roster entry is a plausible `
+    + `match.\n\n`
     + "Every needle you emit will be replaced with the single generic marker `[REDACTED]` downstream, "
     + "so return only the needles themselves (literal substrings). Do NOT emit replacement strings and "
     + "do NOT wrap the needle in any marker.\n\n"
